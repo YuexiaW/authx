@@ -1,11 +1,17 @@
 ## Latest Changes
 
+### Features
+
+* ✨ Implemented AuthManager + Policy Engine. PR [#856](https://github.com/yezz123/authx/pull/856) by [@YuexiaW](https://github.com/YuexiaW).
+
 ### Fixes
 
 * fix: propagate specific JWT exceptions instead of raising generic JWT…. PR [#850](https://github.com/yezz123/authx/pull/850) by [@YuexiaW](https://github.com/YuexiaW).
 
 ### Upgrades
 
+* ⬆ Bump the python-packages group with 2 updates. PR [#860](https://github.com/yezz123/authx/pull/860) by [@dependabot[bot]](https://github.com/apps/dependabot).
+* ⬆ Bump idna from 3.10 to 3.15. PR [#857](https://github.com/yezz123/authx/pull/857) by [@dependabot[bot]](https://github.com/apps/dependabot).
 * ⬆️ Bump `ruff-pre-commit` from v0.15.12 to v0.15.13. PR [#854](https://github.com/yezz123/authx/pull/854) by [@pre-commit-ci[bot]](https://github.com/apps/pre-commit-ci).
 * ⬆ Bump the python-packages group with 2 updates. PR [#853](https://github.com/yezz123/authx/pull/853) by [@dependabot[bot]](https://github.com/apps/dependabot).
 * ⬆ Bump pydantic from 2.13.3 to 2.13.4 in the python-packages group. PR [#849](https://github.com/yezz123/authx/pull/849) by [@dependabot[bot]](https://github.com/apps/dependabot).
@@ -15,6 +21,10 @@
 ### Docs
 
 * docs: add YuexiaW as a contributor for bug. PR [#851](https://github.com/yezz123/authx/pull/851) by [@allcontributors[bot]](https://github.com/apps/allcontributors).
+
+### Internal
+
+* ✨ Add focused edge case tests for AuthX internals . PR [#859](https://github.com/yezz123/authx/pull/859) by [@yezz123](https://github.com/yezz123).
 
 ## 1.6.0
 
