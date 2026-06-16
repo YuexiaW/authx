@@ -164,24 +164,6 @@ See [Token Freshness](./token.md) for more on fresh vs non-fresh tokens.
 
 ---
 
-## With the Dependency Bundle
-
-`create_token_pair` is also available on the `AuthXDependency` bundle:
-
-```python
-from authx import AuthXDependency
-
-@app.post("/login", response_model=TokenResponse)
-def login(data: LoginRequest, deps: AuthXDependency = auth.BUNDLE):
-    """Use the bundle for cookie-based flows."""
-    tokens = deps.create_token_pair(uid=data.username)
-    deps.set_access_cookies(tokens.access_token)
-    deps.set_refresh_cookies(tokens.refresh_token)
-    return tokens
-```
-
-See [Dependency Bundle](../dependencies/bundle.md) for more details.
-
 ---
 
 ## TokenResponse Schema

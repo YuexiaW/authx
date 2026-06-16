@@ -92,7 +92,7 @@ curl -H "Authorization: Bearer <your-token>" http://localhost:8000/protected
 
 ## Features
 
-- Support for Python 3.9+ and Pydantic 2
+- Support for Python 3.10+ and Pydantic 2
 - JWT authentication with multiple token locations:
     - Headers (Bearer token)
     - Cookies (with CSRF protection)

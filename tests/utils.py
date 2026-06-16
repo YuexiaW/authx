@@ -2,9 +2,9 @@ from typing import NamedTuple, Optional
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec, rsa
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Request, Response
 
-from authx import AuthX, AuthXConfig, AuthXDependency, RequestToken, TokenPayload
+from authx import AuthX, AuthXConfig, RequestToken, TokenPayload
 
 
 def generate_rsa_keypair() -> tuple[str, str]:
@@ -142,21 +142,21 @@ def create_token_routes(app: FastAPI, security: AuthX) -> None:
     """Create routes to get tokens from AuthX instance."""
 
     @app.get("/token/access")
-    def _access_token_route(deps: AuthXDependency = security.DEPENDENCY):
-        token = deps.create_access_token(uid="test", fresh=False)
-        deps.set_access_cookies(token)
+    def _access_token_route(response: Response):
+        token = security.create_access_token(uid="test", fresh=False)
+        security.set_access_cookies(token, response)
         return {"token": token}
 
     @app.get("/token/fresh")
-    def _fresh_token_route(deps: AuthXDependency = security.DEPENDENCY):
-        token = deps.create_access_token(uid="test", fresh=True)
-        deps.set_access_cookies(token)
+    def _fresh_token_route(response: Response):
+        token = security.create_access_token(uid="test", fresh=True)
+        security.set_access_cookies(token, response)
         return {"token": token}
 
     @app.get("/token/refresh")
-    def _refresh_token_route(deps: AuthXDependency = security.DEPENDENCY):
-        token = deps.create_refresh_token(uid="test")
-        deps.set_refresh_cookies(token)
+    def _refresh_token_route(response: Response):
+        token = security.create_refresh_token(uid="test")
+        security.set_refresh_cookies(token, response)
         return {"token": token}
 
 

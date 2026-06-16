@@ -10,7 +10,7 @@ class _ErrorHandler:
     """Base Handler for FastAPI handling AuthX exceptions."""
 
     MSG_TokenError = "Token Error"
-    MSG_MissingTokenError = "Missing JWT in request"
+    MSG_MissingTokenError = None  # Use detailed exception message from each raise site
     MSG_MissingCSRFTokenError = None  # Use detailed exception message
     MSG_TokenTypeError = "Bad token type"
     MSG_RevokedTokenError = "Invalid token"
@@ -65,13 +65,17 @@ class _ErrorHandler:
             # Use attribute message if available, otherwise use exception message
             message = attr_message if attr_message is not None else default_message
 
-        content = {
+        content: dict[str, object] = {
             "message": message,
             "error_type": exc.__class__.__name__,
         }
         if isinstance(exc, exceptions.LoginTypeMismatchError):
             content["expected_type"] = exc.expected_type
             content["actual_type"] = exc.actual_type
+
+        token_type = getattr(exc, "token_type", None)
+        if token_type is not None:
+            content["token_type"] = token_type
 
         return JSONResponse(status_code=status_code, content=content)
 
@@ -101,7 +105,7 @@ class _ErrorHandler:
             app,
             exception=exceptions.MissingTokenError,
             status_code=401,
-            message=self.MSG_TokenError,
+            message=None,  # Use detailed exception message for better user guidance
         )
         self._set_app_exception_handler(
             app,

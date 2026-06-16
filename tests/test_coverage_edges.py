@@ -125,13 +125,6 @@ def test_unset_access_cookies_without_csrf_cookie_branch():
     assert len(response.headers.getlist("set-cookie")) == 1
 
 
-def test_dependency_alias_properties_return_depends():
-    auth = AuthX(config=AuthXConfig(JWT_SECRET_KEY="secret"))
-
-    assert auth.BUNDLE.dependency == auth.get_dependency
-    assert auth.WS_AUTH_REQUIRED.dependency == auth._ws_auth_required
-
-
 @pytest.mark.asyncio
 async def test_auth_required_with_explicit_csrf_false_branch():
     auth = AuthX(config=AuthXConfig(JWT_SECRET_KEY="secret", JWT_TOKEN_LOCATION=["headers"]))

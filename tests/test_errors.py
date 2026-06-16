@@ -105,7 +105,7 @@ async def create_exception_route(app: FastAPI, exception: type[Exception]):
             exc.MissingTokenError,
             401,
             None,
-            _ErrorHandler.MSG_MissingTokenError,
+            "",  # MSG_MissingTokenError=None → falls back to str(exc) for detailed message
         ),
         (exc.TokenTypeError, 401, None, _ErrorHandler.MSG_TokenTypeError),
         (

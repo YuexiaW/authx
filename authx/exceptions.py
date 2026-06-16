@@ -6,15 +6,17 @@ from typing import Any, Optional
 class AuthXException(Exception):
     """Base AuthXException Exception."""
 
-    def __init__(self, *args: Any, login_type: Optional[str] = None, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, login_type: Optional[str] = None, token_type: Optional[str] = None, **kwargs: Any) -> None:
         """Initialize AuthXException.
 
         Args:
             *args: Arguments for the exception.
             login_type: The login type associated with the exception.
+            token_type: The token type ("access" or "refresh") associated with the exception.
             **kwargs: Keyword arguments for the exception.
         """
         self.login_type = login_type
+        self.token_type = token_type
         super().__init__(*args)
 
 

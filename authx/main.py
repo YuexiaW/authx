@@ -21,7 +21,6 @@ from authx._internal._session import SessionInfo
 from authx._internal._utils import get_uuid
 from authx.config import AuthXConfig
 from authx.core import _get_token_from_request
-from authx.dependencies import AuthXDependency
 from authx.exceptions import (
     AuthXException,
     InsufficientScopeError,
@@ -58,23 +57,47 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
 
     def __init__(
         self,
-        config: AuthXConfig = AuthXConfig(),
+        config: Optional[AuthXConfig] = None,
         model: Optional[T] = None,
         login_type: Optional[str] = None,
     ) -> None:
         """AuthX base object.
 
         Args:
-            config (AuthXConfig, optional): Configuration instance to use. Defaults to AuthXConfig().
+            config (AuthXConfig, optional): Configuration instance to use. Defaults to ``AuthXConfig()``.
             model (Optional[T], optional): Model type hint. Defaults to dict[str, Any].
             login_type (Optional[str], optional): Explicit login type for manager-based auth contexts.
         """
         self.model: Union[T, dict[str, Any]] = model if model is not None else {}
         super().__init__(model=model)
         super(_CallbackHandler, self).__init__()
-        self._config = config
+        self._config = config if config is not None else AuthXConfig()
         self._session_store: Optional[Any] = None
         self.login_type = login_type
+
+        # Pre-create stable dependency callables — same identity on every access.
+        # Without this, @property creates a new closure each time → FastAPI cannot
+        # share sub-dependency cache across routes using the same auth object.
+        self._access_token_required_fn = self._build_token_required_fn(
+            type="access", verify_type=True, verify_fresh=False, verify_csrf=None, locations=None,
+        )
+        self._refresh_token_required_fn = self._build_token_required_fn(
+            type="refresh", verify_type=True, verify_fresh=False, verify_csrf=None, locations=None,
+        )
+        self._fresh_token_required_fn = self._build_token_required_fn(
+            type="access", verify_type=True, verify_fresh=True, verify_csrf=None, locations=None,
+        )
+        self._access_token_fn = self._build_get_token_fn(refresh=False)
+        self._refresh_token_fn = self._build_get_token_fn(refresh=True)
+
+        # Stable Depends-wrapped dependency aliases — created once.
+        self.ACCESS_REQUIRED: TokenPayload = Depends(self._access_token_required_fn)
+        self.REFRESH_REQUIRED: TokenPayload = Depends(self._refresh_token_required_fn)
+        self.FRESH_REQUIRED: TokenPayload = Depends(self._fresh_token_required_fn)
+        self.ACCESS_TOKEN: RequestToken = Depends(self._access_token_fn)
+        self.REFRESH_TOKEN: RequestToken = Depends(self._refresh_token_fn)
+        self.CURRENT_SUBJECT: T = Depends(self.get_current_subject)
+        self.WS_AUTH_REQUIRED: TokenPayload = Depends(self._ws_auth_required)
 
     def load_config(self, config: AuthXConfig) -> None:
         """Load and store the configuration for the authentication system.
@@ -383,20 +406,24 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
                 request.method.upper() in self.config.JWT_CSRF_METHODS
             )
 
-        request_token = await method(
-            request=request,
-            locations=locations,
-        )
+        try:
+            request_token = await method(
+                request=request,
+                locations=locations,
+            )
 
-        if await self.is_token_in_blocklist(request_token.token):
-            raise RevokedTokenError("Token has been revoked", login_type=self.login_type)
+            if await self.is_token_in_blocklist(request_token.token):
+                raise RevokedTokenError("Token has been revoked", login_type=self.login_type)
 
-        return self.verify_token(
-            request_token,
-            verify_type=verify_type,
-            verify_fresh=verify_fresh,
-            verify_csrf=verify_csrf,
-        )
+            return self.verify_token(
+                request_token,
+                verify_type=verify_type,
+                verify_fresh=verify_fresh,
+                verify_csrf=verify_csrf,
+            )
+        except AuthXException as exc:
+            exc.token_type = type
+            raise
 
     def verify_token(
         self,
@@ -648,70 +675,56 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
         self.unset_access_cookies(response)
         self.unset_refresh_cookies(response)
 
-    # Notes:
-    # The AuthXDeps is a utility class, to enable quick token operations
-    # within the route logic. It provides methods to avoid additional code
-    # in your route that would be outside of the route logic
+    def _build_token_required_fn(
+        self,
+        type: str = "access",
+        verify_type: bool = True,
+        verify_fresh: bool = False,
+        verify_csrf: Optional[bool] = None,
+        locations: Optional[TokenLocations] = None,
+    ) -> Callable[[Request], Awaitable[TokenPayload]]:
+        """Create a stable closure for token-required dependency.
 
-    # Such methods includes setting and unsetting cookies without the need
-    # to generate a response object beforehand.
+        Args:
+            type: Token type to require. Defaults to "access".
+            verify_type: Apply type verification. Defaults to True.
+            verify_fresh: Require token freshness. Defaults to False.
+            verify_csrf: Enable CSRF verification. Defaults to None.
+            locations: Token retrieval locations. Defaults to None.
 
-    @property
-    def DEPENDENCY(self) -> AuthXDependency[Any]:
-        """FastAPI Dependency to return an AuthX sub-object within the route context."""
-        return Depends(self.get_dependency)
-
-    @property
-    def BUNDLE(self) -> AuthXDependency[Any]:
-        """FastAPI Dependency to return a AuthX sub-object within the route context."""
-        return self.DEPENDENCY
-
-    @property
-    def FRESH_REQUIRED(self) -> TokenPayload:
-        """FastAPI Dependency to enforce valid token availability in request."""
-        return Depends(self.fresh_token_required)
-
-    @property
-    def ACCESS_REQUIRED(self) -> TokenPayload:
-        """FastAPI Dependency to enforce presence of an `access` token in request."""
-        return Depends(self.access_token_required)
-
-    @property
-    def REFRESH_REQUIRED(self) -> TokenPayload:
-        """FastAPI Dependency to enforce presence of a `refresh` token in request."""
-        return Depends(self.refresh_token_required)
-
-    @property
-    def ACCESS_TOKEN(self) -> RequestToken:
-        """FastAPI Dependency to retrieve access token from request."""
-
-        async def _get_access_token(request: Request) -> Optional[RequestToken]:
-            return await self._get_token_from_request(request, refresh=False, optional=True)
-
-        return Depends(_get_access_token)
-
-    @property
-    def REFRESH_TOKEN(self) -> RequestToken:
-        """FastAPI Dependency to retrieve refresh token from request."""
-
-        async def _get_refresh_token(request: Request) -> Optional[RequestToken]:
-            return await self._get_token_from_request(request, refresh=True, optional=True)
-
-        return Depends(_get_refresh_token)
-
-    @property
-    def CURRENT_SUBJECT(self) -> T:
-        """FastAPI Dependency to retrieve the current subject from request."""
-        return Depends(self.get_current_subject)
-
-    @property
-    def WS_AUTH_REQUIRED(self) -> TokenPayload:
-        """FastAPI Dependency to enforce valid access token on a WebSocket connection.
-
-        Extracts the token from the ``token`` query parameter or the ``Authorization``
-        header of the WebSocket handshake request.
+        Returns:
+            Callable: a stable async callable usable with ``Depends()``.
         """
-        return Depends(self._ws_auth_required)
+
+        async def _auth_required(request: Request) -> Any:
+            return await self._auth_required(
+                request=request,
+                type=type,
+                verify_csrf=verify_csrf,
+                verify_type=verify_type,
+                verify_fresh=verify_fresh,
+                locations=locations,
+            )
+
+        return _auth_required
+
+    def _build_get_token_fn(
+        self,
+        refresh: bool = False,
+    ) -> Callable[[Request], Awaitable[Optional[RequestToken]]]:
+        """Create a stable closure for token-extraction dependency.
+
+        Args:
+            refresh: Whether to extract the refresh token. Defaults to False.
+
+        Returns:
+            Callable: a stable async callable usable with ``Depends()``.
+        """
+
+        async def _get_token(request: Request) -> Optional[RequestToken]:
+            return await self._get_token_from_request(request, refresh=refresh, optional=True)
+
+        return _get_token
 
     async def _ws_auth_required(self, websocket: WebSocket) -> TokenPayload:
         """Verify an access token from a WebSocket connection.
@@ -723,45 +736,29 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
             MissingTokenError: When no token is found.
             JWTDecodeError: When the token is invalid.
         """
-        token_str: Optional[str] = websocket.query_params.get(self.config.JWT_QUERY_STRING_NAME)
-        if token_str is None:
-            auth_header = websocket.headers.get(self.config.JWT_HEADER_NAME)
-            if auth_header is not None and self.config.JWT_HEADER_TYPE:
-                token_str = auth_header.removeprefix(f"{self.config.JWT_HEADER_TYPE} ")
-            elif auth_header is not None:
-                token_str = auth_header
+        try:
+            token_str: Optional[str] = websocket.query_params.get(self.config.JWT_QUERY_STRING_NAME)
+            if token_str is None:
+                auth_header = websocket.headers.get(self.config.JWT_HEADER_NAME)
+                if auth_header is not None and self.config.JWT_HEADER_TYPE:
+                    token_str = auth_header.removeprefix(f"{self.config.JWT_HEADER_TYPE} ")
+                elif auth_header is not None:
+                    token_str = auth_header
 
-        if token_str is None:
-            raise MissingTokenError(
-                f"Missing token in WebSocket query parameter '{self.config.JWT_QUERY_STRING_NAME}' "
-                f"or '{self.config.JWT_HEADER_NAME}' header",
-                login_type=self.login_type,
-            )
+            if token_str is None:
+                raise MissingTokenError(
+                    f"Missing token in WebSocket query parameter '{self.config.JWT_QUERY_STRING_NAME}' "
+                    f"or '{self.config.JWT_HEADER_NAME}' header",
+                    login_type=self.login_type,
+                )
 
-        request_token = RequestToken(token=token_str, csrf=None, type="access", location="query")
-        if await self.is_token_in_blocklist(request_token.token):
-            raise RevokedTokenError("Token has been revoked", login_type=self.login_type)
-        return self.verify_token(request_token, verify_type=True, verify_fresh=False, verify_csrf=False)
-
-    def get_dependency(self, request: Request, response: Response) -> AuthXDependency[Any]:
-        """FastAPI Dependency to return a AuthX sub-object within the route context.
-
-        Args:
-            request (Request): Request context managed by FastAPI
-            response (Response): Response context managed by FastAPI
-
-        Note:
-            The AuthXDeps is a utility class, to enable quick token operations
-            within the route logic. It provides methods to avoid additional code
-            in your route that would be outside of the route logic
-
-            Such methods includes setting and unsetting cookies without the need
-            to generate a response object beforehand
-
-        Returns:
-            AuthXDeps: The contextful AuthX object
-        """
-        return AuthXDependency(self, request=request, response=response)
+            request_token = RequestToken(token=token_str, csrf=None, type="access", location="query")
+            if await self.is_token_in_blocklist(request_token.token):
+                raise RevokedTokenError("Token has been revoked", login_type=self.login_type)
+            return self.verify_token(request_token, verify_type=True, verify_fresh=False, verify_csrf=False)
+        except AuthXException as exc:
+            exc.token_type = "access"
+            raise
 
     def token_required(
         self,
@@ -783,48 +780,28 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
         Returns:
             Callable[[Request], TokenPayload]: Dependency for Valid token Payload retrieval
         """
-
-        async def _auth_required(request: Request) -> Any:
-            return await self._auth_required(
-                request=request,
-                type=type,
-                verify_csrf=verify_csrf,
-                verify_type=verify_type,
-                verify_fresh=verify_fresh,
-                locations=locations,
-            )
-
-        return _auth_required
+        return self._build_token_required_fn(
+            type=type,
+            verify_type=verify_type,
+            verify_fresh=verify_fresh,
+            verify_csrf=verify_csrf,
+            locations=locations,
+        )
 
     @property
     def fresh_token_required(self) -> Callable[[Request], Awaitable[TokenPayload]]:
         """FastAPI Dependency to enforce presence of a `fresh` `access` token in request."""
-        return self.token_required(
-            type="access",
-            verify_csrf=None,
-            verify_fresh=True,
-            verify_type=True,
-        )
+        return self._fresh_token_required_fn
 
     @property
     def access_token_required(self) -> Callable[[Request], Awaitable[TokenPayload]]:
         """FastAPI Dependency to enforce presence of an `access` token in request."""
-        return self.token_required(
-            type="access",
-            verify_csrf=None,
-            verify_fresh=False,
-            verify_type=True,
-        )
+        return self._access_token_required_fn
 
     @property
     def refresh_token_required(self) -> Callable[[Request], Awaitable[TokenPayload]]:
         """FastAPI Dependency to enforce presence of a `refresh` token in request."""
-        return self.token_required(
-            type="refresh",
-            verify_csrf=None,
-            verify_fresh=False,
-            verify_type=True,
-        )
+        return self._refresh_token_required_fn
 
     def scopes_required(
         self,

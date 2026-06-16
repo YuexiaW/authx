@@ -99,18 +99,6 @@ def get_me(user=auth.CURRENT_SUBJECT):
     return user
 ```
 
-### BUNDLE / DEPENDENCY
-
-Gets `AuthXDependency` for cookie operations within routes.
-
-```python
-@app.post("/login")
-def login(deps=auth.BUNDLE):
-    token = deps.create_access_token(uid="user")
-    deps.set_access_cookies(token)
-    return {"message": "Logged in"}
-```
-
 ## Complete Example
 
 ```python
