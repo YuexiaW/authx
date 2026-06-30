@@ -1,5 +1,22 @@
 ## Latest Changes
 
+### Upgrades
+
+* ⬆ Bump ruff from 0.15.18 to 0.15.20 in the python-packages group. PR [#874](https://github.com/yezz123/authx/pull/874) by [@dependabot[bot]](https://github.com/apps/dependabot).
+
+## 1.7.1
+
+### Fixes
+
+* 🐛 Add custom exception handlers and enhance OpenAPI security in AuthX. PR [#873](https://github.com/yezz123/authx/pull/873) by [@yezz123](https://github.com/yezz123).
+
+### Upgrades
+
+* ⬆️ Bump `ruff-pre-commit` from v0.15.17 to v0.15.18. PR [#871](https://github.com/yezz123/authx/pull/871) by [@pre-commit-ci[bot]](https://github.com/apps/pre-commit-ci).
+* ⬆ Bump the python-packages group with 2 updates. PR [#870](https://github.com/yezz123/authx/pull/870) by [@dependabot[bot]](https://github.com/apps/dependabot).
+* Bump pyjwt from 2.12.0 to 2.13.0 in /examples. PR [#867](https://github.com/yezz123/authx/pull/867) by [@dependabot[bot]](https://github.com/apps/dependabot).
+* ⬆ Bump pyjwt from 2.12.0 to 2.13.0. PR [#868](https://github.com/yezz123/authx/pull/868) by [@dependabot[bot]](https://github.com/apps/dependabot).
+
 ## 1.7.0
 
 ### Features
