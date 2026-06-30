@@ -43,7 +43,7 @@ async def test_auth_required_revoked_token(authx):
     async def is_token(t: str) -> bool:
         return t == token
 
-    authx.is_token_in_blocklist = is_token
+    authx.set_token_blocklist(is_token)
 
     with pytest.raises(AuthXException):
         await authx._auth_required(_make_request(token))

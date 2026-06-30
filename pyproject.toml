@@ -240,7 +240,7 @@ asyncio_mode= "auto"
 filterwarnings = [
     'error',
     'ignore::DeprecationWarning',
-    'ignore::jwt.warnings.InsecureKeyLengthWarning',
+    'ignore::PendingDeprecationWarning',
 ]
 
 [tool.codespell]

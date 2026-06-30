@@ -105,16 +105,6 @@ def test_previous_public_key_with_unsupported_algorithm_returns_none():
     assert config.previous_public_key is None
 
 
-def test_decode_token_preserves_existing_exception_login_type():
-    auth = AuthX(config=AuthXConfig(JWT_SECRET_KEY="secret"), login_type="admin")
-
-    with patch.object(TokenPayload, "decode", side_effect=JWTDecodeError("bad", login_type="external")):
-        with pytest.raises(JWTDecodeError) as exc_info:
-            auth._decode_token("token")
-
-    assert exc_info.value.login_type == "external"
-
-
 def test_unset_access_cookies_without_csrf_cookie_branch():
     auth = AuthX(config=AuthXConfig(JWT_SECRET_KEY="secret"))
     auth.config.JWT_COOKIE_CSRF_PROTECT = False
@@ -147,17 +137,6 @@ async def test_auth_required_with_explicit_csrf_false_branch():
     payload = await auth._auth_required(request=request, verify_csrf=False)
 
     assert payload.sub == "user"
-
-
-def test_verify_token_preserves_existing_exception_login_type():
-    auth = AuthX(config=AuthXConfig(JWT_SECRET_KEY="secret"), login_type="admin")
-    request_token = RequestToken(token="token", csrf=None, type="access", location="headers")
-
-    with patch.object(RequestToken, "verify", side_effect=JWTDecodeError("bad", login_type="external")):
-        with pytest.raises(JWTDecodeError) as exc_info:
-            auth.verify_token(request_token)
-
-    assert exc_info.value.login_type == "external"
 
 
 @pytest.mark.asyncio

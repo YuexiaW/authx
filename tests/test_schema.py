@@ -48,8 +48,8 @@ def valid_refresh_payload():
 
 @pytest.fixture(scope="function")
 def invalid_payload():
-    return TokenPayload(
-        type="false",
+    return TokenPayload.model_construct(
+        type="false",  # type: ignore[arg-type]  # intentionally invalid for testing
         fresh=False,
         sub="BOOOM",
         csrf="CSRF_TOKEN",
@@ -238,8 +238,8 @@ def test_token_verify_none_csrf_claim_exception():
     KEY = "SECRET"
     ALGO = "HS256"
 
-    payload = TokenPayload(
-        type="false",
+    payload = TokenPayload.model_construct(
+        type="false",  # type: ignore[arg-type]  # intentionally invalid for testing
         fresh=False,
         sub="BOOOM",
         csrf=None,
@@ -358,8 +358,8 @@ def test_verify_token_type_exception():
     KEY = "SECRET"
     ALGO = "HS256"
 
-    payload = TokenPayload(
-        type="false",
+    payload = TokenPayload.model_construct(
+        type="false",  # type: ignore[arg-type]  # intentionally invalid for testing
         fresh=False,
         sub="BOOOM",
         csrf=None,

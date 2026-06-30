@@ -106,7 +106,7 @@ class LoginTypeMismatchError(TokenTypeError):
             expected_type: Login type required by the protected endpoint.
             actual_type: Login type found in the token, if it could be determined.
             message: Optional custom error message.
-            login_type: The login_type to set on the base exception.
+            login_type: The login type associated with the exception.
         """
         self.expected_type = expected_type
         self.actual_type = actual_type
@@ -167,7 +167,7 @@ class InsufficientScopeError(TokenError):
             required: List of scopes that were required.
             provided: List of scopes that were provided in the token.
             message: Optional custom error message.
-            login_type: The login_type to set on the base exception.
+            login_type: The login type associated with the exception.
         """
         self.required = required
         self.provided = provided or []
@@ -184,7 +184,7 @@ class PolicyDeniedError(TokenError):
 
         Args:
             reason: Human-readable reason for the denial.
-            login_type: The login_type to set on the base exception.
+            login_type: The login type associated with the exception.
         """
         self.reason = reason
         super().__init__(reason, login_type=login_type)

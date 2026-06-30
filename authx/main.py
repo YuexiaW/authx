@@ -5,6 +5,7 @@ from collections.abc import Awaitable, Coroutine
 from typing import (
     Any,
     Callable,
+    Generic,
     Literal,
     Optional,
     Union,
@@ -15,10 +16,13 @@ from fastapi import Depends, Request, Response, WebSocket
 from fastapi.security import APIKeyCookie, APIKeyHeader, APIKeyQuery, HTTPBearer
 
 from authx._internal._callback import _CallbackHandler
+from authx._internal._cookie_service import CookieService
 from authx._internal._error import _ErrorHandler
 from authx._internal._ratelimit import RateLimiter
 from authx._internal._scopes import has_required_scopes
 from authx._internal._session import SessionInfo
+from authx._internal._session_service import SessionService
+from authx._internal._token_service import TokenService
 from authx._internal._utils import get_uuid
 from authx.config import AuthXConfig
 from authx.core import _get_token_from_request
@@ -33,6 +37,7 @@ from authx.exceptions import (
 from authx.schema import RequestToken, TokenPayload, TokenResponse
 from authx.types import (
     DateTimeExpression,
+    SessionStoreProtocol,
     StringOrSequence,
     T,
     TokenLocations,
@@ -55,7 +60,7 @@ _OPENAPI_REFRESH_COOKIE_DESCRIPTION = "Provide an AuthX refresh token in this co
 _OPENAPI_QUERY_DESCRIPTION = "Provide an AuthX JWT in this query parameter."
 
 
-class AuthX(_CallbackHandler[T], _ErrorHandler):
+class AuthX(Generic[T]):
     """The base class for AuthX.
 
     AuthX enables JWT management within a FastAPI application.
@@ -86,11 +91,29 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
             login_type (Optional[str], optional): Explicit login type for manager-based auth contexts.
         """
         self.model: Union[T, dict[str, Any]] = model if model is not None else {}
-        super().__init__(model=model)
-        super(_CallbackHandler, self).__init__()
+        self._callbacks = _CallbackHandler[T](model=model)
+        self._error_handler = _ErrorHandler()
         self._config = config
-        self._session_store: Optional[Any] = None
         self.login_type = login_type
+        self._token_service = TokenService(config=self._config, login_type=self.login_type)
+        self._cookie_service = CookieService(config=self._config, token_service=self._token_service)
+        self._session_service = SessionService()
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        # Forward MSG_* attribute sets to _error_handler for backward
+        # compatibility after the composition refactor (P0-3).
+        if name.startswith("MSG_") and "_error_handler" in self.__dict__:
+            object.__setattr__(self._error_handler, name, value)
+        else:
+            object.__setattr__(self, name, value)
+
+    def __getattr__(self, name: str) -> Any:
+        # Forward MSG_* attribute reads to _error_handler for backward
+        # compatibility after the composition refactor (P0-3).
+        if name.startswith("MSG_"):
+            return getattr(self._error_handler, name)
+        msg = f"'{type(self).__name__}' object has no attribute '{name}'"
+        raise AttributeError(msg)
 
     def load_config(self, config: AuthXConfig) -> None:
         """Load and store the configuration for the authentication system.
@@ -104,6 +127,54 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
             None
         """
         self._config = config
+        self._token_service = TokenService(config=self._config, login_type=self.login_type)
+        self._cookie_service = CookieService(config=self._config, token_service=self._token_service)
+
+    # --- Callback forwarding (delegated to _callbacks) ---
+
+    def set_callback_get_model_instance(self, callback: Any) -> None:
+        """Set the callback for model/subject retrieval.
+
+        Args:
+            callback: A callable (sync or async) that accepts a uid and returns the subject/model.
+        """
+        self._callbacks.set_callback_get_model_instance(callback)
+
+    def set_callback_token_blocklist(self, callback: Any) -> None:
+        """Set the callback for token blocklist validation.
+
+        Args:
+            callback: A callable (sync or async) that accepts a token string
+                      and returns a boolean indicating if the token is revoked.
+        """
+        self._callbacks.set_callback_token_blocklist(callback)
+
+    def set_subject_getter(self, callback: Any) -> None:
+        """Set the callback to run for subject retrieval and serialization.
+
+        Args:
+            callback: A callable (sync or async) that accepts a uid and returns the subject/model.
+        """
+        self._callbacks.set_subject_getter(callback)
+
+    def set_token_blocklist(self, callback: Any) -> None:
+        """Set the callback to run for validation of revoked tokens.
+
+        Args:
+            callback: A callable (sync or async) that accepts a token string
+                      and returns a boolean indicating if the token is revoked.
+        """
+        self._callbacks.set_token_blocklist(callback)
+
+    # --- Error handler forwarding (delegated to _error_handler) ---
+
+    def handle_errors(self, app: Any) -> None:
+        """Register AuthX exception handlers on a FastAPI application.
+
+        Args:
+            app: The FastAPI application to attach exception handlers to.
+        """
+        self._error_handler.handle_errors(app)
 
     @property
     def config(self) -> AuthXConfig:
@@ -125,37 +196,15 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
         scopes: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> TokenPayload:
-        # Handle additional data
-        if data is None:
-            data = {}
-        elif self.login_type is not None:
-            data = data.copy()
-        if self.login_type is not None:
-            data["login_type"] = self.login_type
-        # Handle expiry date
-        exp = expiry
-        if exp is None:
-            exp = self.config.JWT_ACCESS_TOKEN_EXPIRES if type == "access" else self.config.JWT_REFRESH_TOKEN_EXPIRES
-        # Handle CSRF
-        csrf = ""
-        if self.config.has_location("cookies") and self.config.JWT_COOKIE_CSRF_PROTECT:
-            csrf = get_uuid()
-        # Handle audience
-        aud = audience
-        if aud is None:
-            aud = self.config.JWT_ENCODE_AUDIENCE
-        return TokenPayload(
-            sub=uid,
-            fresh=fresh,
-            exp=exp,
+        return self._token_service.create_payload(
+            uid=uid,
             type=type,
-            iss=self.config.JWT_ENCODE_ISSUER,
-            aud=aud,
-            csrf=csrf,
+            fresh=fresh,
+            expiry=expiry,
+            data=data,
+            audience=audience,
             scopes=scopes,
-            # Handle NBF
-            nbf=None,
-            **data,
+            **kwargs,
         )
 
     def _create_token(
@@ -170,24 +219,16 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
         scopes: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> str:
-        if self.login_type is not None:
-            data = data.copy() if data is not None else {}
-            data["login_type"] = self.login_type
-        payload = self._create_payload(
+        return self._token_service.create_token(
             uid=uid,
             type=type,
             fresh=fresh,
+            headers=headers,
             expiry=expiry,
             data=data,
             audience=audience,
             scopes=scopes,
             **kwargs,
-        )
-        return payload.encode(
-            key=self.config.private_key,
-            algorithm=self.config.JWT_ALGORITHM,
-            headers=headers,
-            data=data,
         )
 
     def _decode_token(
@@ -197,32 +238,12 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
         audience: Optional[StringOrSequence] = None,
         issuer: Optional[str] = None,
     ) -> TokenPayload:
-        try:
-            try:
-                return TokenPayload.decode(
-                    token=token,
-                    key=self.config.public_key,
-                    algorithms=[self.config.JWT_ALGORITHM],
-                    verify=verify,
-                    audience=audience or self.config.JWT_DECODE_AUDIENCE,
-                    issuer=issuer or self.config.JWT_DECODE_ISSUER,
-                )
-            except JWTDecodeError:
-                previous_key = self.config.previous_public_key
-                if previous_key is None:
-                    raise
-                return TokenPayload.decode(
-                    token=token,
-                    key=previous_key,
-                    algorithms=[self.config.JWT_ALGORITHM],
-                    verify=verify,
-                    audience=audience or self.config.JWT_DECODE_AUDIENCE,
-                    issuer=issuer or self.config.JWT_DECODE_ISSUER,
-                )
-        except AuthXException as e:
-            if e.login_type is None:
-                e.login_type = self.login_type
-            raise
+        return self._token_service.decode_token(
+            token=token,
+            verify=verify,
+            audience=audience,
+            issuer=issuer,
+        )
 
     def _set_cookies(
         self,
@@ -233,75 +254,14 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        if type == "access":
-            token_key = self.config.JWT_ACCESS_COOKIE_NAME
-            token_path = self.config.JWT_ACCESS_COOKIE_PATH
-            csrf_key = self.config.JWT_ACCESS_CSRF_COOKIE_NAME
-            csrf_path = self.config.JWT_ACCESS_CSRF_COOKIE_PATH
-        elif type == "refresh":
-            token_key = self.config.JWT_REFRESH_COOKIE_NAME
-            token_path = self.config.JWT_REFRESH_COOKIE_PATH
-            csrf_key = self.config.JWT_REFRESH_CSRF_COOKIE_NAME
-            csrf_path = self.config.JWT_REFRESH_CSRF_COOKIE_PATH
-        else:
-            raise ValueError("Token type must be 'access' | 'refresh'")
-
-        # Set cookie
-        response.set_cookie(
-            key=token_key,
-            value=token,
-            path=token_path,
-            domain=self.config.JWT_COOKIE_DOMAIN,
-            samesite=self.config.JWT_COOKIE_SAMESITE,
-            secure=self.config.JWT_COOKIE_SECURE,
-            httponly=self.config.JWT_COOKIE_HTTP_ONLY,
-            max_age=max_age or self.config.JWT_COOKIE_MAX_AGE,
-        )
-        # Set CSRF
-        if self.config.JWT_COOKIE_CSRF_PROTECT and self.config.JWT_CSRF_IN_COOKIES:
-            # Set CSRF cookie to be string not None
-            csrf = self._decode_token(token=token, verify=True).csrf
-            str_csrf = csrf if csrf is not None else ""
-            response.set_cookie(
-                key=csrf_key,
-                value=str_csrf,
-                path=csrf_path,
-                domain=self.config.JWT_COOKIE_DOMAIN,
-                samesite=self.config.JWT_COOKIE_SAMESITE,
-                secure=self.config.JWT_COOKIE_SECURE,
-                httponly=False,
-                max_age=max_age or self.config.JWT_COOKIE_MAX_AGE,
-            )
+        self._cookie_service.set_cookies(token=token, type=type, response=response, max_age=max_age)
 
     def _unset_cookies(
         self,
         type: str,
         response: Response,
     ) -> None:
-        if type == "access":
-            token_key = self.config.JWT_ACCESS_COOKIE_NAME
-            token_path = self.config.JWT_ACCESS_COOKIE_PATH
-            csrf_key = self.config.JWT_ACCESS_CSRF_COOKIE_NAME
-            csrf_path = self.config.JWT_ACCESS_CSRF_COOKIE_PATH
-        elif type == "refresh":
-            token_key = self.config.JWT_REFRESH_COOKIE_NAME
-            token_path = self.config.JWT_REFRESH_COOKIE_PATH
-            csrf_key = self.config.JWT_REFRESH_CSRF_COOKIE_NAME
-            csrf_path = self.config.JWT_REFRESH_CSRF_COOKIE_PATH
-        else:
-            raise ValueError("Token type must be 'access' | 'refresh'")
-        # Unset cookie
-        response.delete_cookie(
-            key=token_key,
-            path=token_path,
-            domain=self.config.JWT_COOKIE_DOMAIN,
-        )
-        if self.config.JWT_COOKIE_CSRF_PROTECT and self.config.JWT_CSRF_IN_COOKIES:
-            response.delete_cookie(
-                key=csrf_key,
-                path=csrf_path,
-                domain=self.config.JWT_COOKIE_DOMAIN,
-            )
+        self._cookie_service.unset_cookies(type=type, response=response)
 
     @overload
     async def _get_token_from_request(
@@ -404,7 +364,7 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
             locations=locations,
         )
 
-        if await self.is_token_in_blocklist(request_token.token):
+        if await self._callbacks.is_token_in_blocklist(request_token.token):
             raise RevokedTokenError("Token has been revoked", login_type=self.login_type)
 
         return self.verify_token(
@@ -435,34 +395,12 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
         Returns:
             TokenPayload: Verified token payload
         """
-        try:
-            try:
-                return token.verify(
-                    key=self.config.public_key,
-                    algorithms=[self.config.JWT_ALGORITHM],
-                    verify_fresh=verify_fresh,
-                    verify_type=verify_type,
-                    verify_csrf=verify_csrf,
-                    audience=self.config.JWT_DECODE_AUDIENCE,
-                    issuer=self.config.JWT_DECODE_ISSUER,
-                )
-            except JWTDecodeError:
-                previous_key = self.config.previous_public_key
-                if previous_key is None:
-                    raise
-                return token.verify(
-                    key=previous_key,
-                    algorithms=[self.config.JWT_ALGORITHM],
-                    verify_fresh=verify_fresh,
-                    verify_type=verify_type,
-                    verify_csrf=verify_csrf,
-                    audience=self.config.JWT_DECODE_AUDIENCE,
-                    issuer=self.config.JWT_DECODE_ISSUER,
-                )
-        except AuthXException as e:
-            if e.login_type is None:
-                e.login_type = self.login_type
-            raise
+        return self._token_service.verify_token(
+            token=token,
+            verify_type=verify_type,
+            verify_fresh=verify_fresh,
+            verify_csrf=verify_csrf,
+        )
 
     def create_access_token(
         self,
@@ -613,7 +551,7 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
             response (Response): response to set cookie on
             max_age (Optional[int], optional): Max Age cookie parameter. Defaults to None.
         """
-        self._set_cookies(token=token, type="access", response=response, max_age=max_age)
+        self._cookie_service.set_access_cookies(token=token, response=response, max_age=max_age)
 
     def set_refresh_cookies(
         self,
@@ -628,7 +566,7 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
             response (Response): response to set cookie on
             max_age (Optional[int], optional): Max Age cookie parameter. Defaults to None.
         """
-        self._set_cookies(token=token, type="refresh", response=response, max_age=max_age)
+        self._cookie_service.set_refresh_cookies(token=token, response=response, max_age=max_age)
 
     def unset_access_cookies(
         self,
@@ -639,7 +577,7 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
         Args:
             response (Response): response to remove cooke from
         """
-        self._unset_cookies("access", response=response)
+        self._cookie_service.unset_access_cookies(response=response)
 
     def unset_refresh_cookies(
         self,
@@ -650,7 +588,7 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
         Args:
             response (Response): response to remove cooke from
         """
-        self._unset_cookies("refresh", response=response)
+        self._cookie_service.unset_refresh_cookies(response=response)
 
     def unset_cookies(
         self,
@@ -661,8 +599,7 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
         Args:
             response (Response): response to remove token cookies from
         """
-        self.unset_access_cookies(response)
-        self.unset_refresh_cookies(response)
+        self._cookie_service.unset_cookies_all(response=response)
 
     # Notes:
     # The AuthXDeps is a utility class, to enable quick token operations
@@ -755,7 +692,7 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
             )
 
         request_token = RequestToken(token=token_str, csrf=None, type="access", location="query")
-        if await self.is_token_in_blocklist(request_token.token):
+        if await self._callbacks.is_token_in_blocklist(request_token.token):
             raise RevokedTokenError("Token has been revoked", login_type=self.login_type)
         return self.verify_token(request_token, verify_type=True, verify_fresh=False, verify_csrf=False)
 
@@ -863,7 +800,7 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
             _authx_openapi_cookie: Any = cookie_dependency,
             _authx_openapi_query: Any = query_dependency,
         ) -> Any:
-            self.ensure_request_exception_handlers(request)
+            self._error_handler.ensure_request_exception_handlers(request)
             return await self._auth_required(
                 request=request,
                 type=type,
@@ -969,7 +906,7 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
             _authx_openapi_cookie: Any = cookie_dependency,
             _authx_openapi_query: Any = query_dependency,
         ) -> TokenPayload:
-            self.ensure_request_exception_handlers(request)
+            self._error_handler.ensure_request_exception_handlers(request)
             payload = await self._auth_required(
                 request=request,
                 type="access",
@@ -1001,10 +938,10 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
         Returns:
             The authenticated subject if present, otherwise None.
         """
-        self.ensure_request_exception_handlers(request)
+        self._error_handler.ensure_request_exception_handlers(request)
         token: TokenPayload = await self._auth_required(request=request)
         uid = token.sub
-        return await self._get_current_subject(uid=uid)
+        return await self._callbacks._get_current_subject(uid=uid)
 
     @overload
     async def get_token_from_request(
@@ -1169,13 +1106,13 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
 
     # --- Session Management ---
 
-    def set_session_store(self, store: Any) -> None:
+    def set_session_store(self, store: Optional[SessionStoreProtocol] = None) -> None:
         """Register a session storage backend.
 
         Args:
             store: An object implementing the ``SessionStoreProtocol``.
         """
-        self._session_store = store
+        self._session_service.set_session_store(store)
 
     async def create_session(
         self,
@@ -1193,24 +1130,7 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
         Returns:
             The created ``SessionInfo`` instance.
         """
-        ip_address: Optional[str] = None
-        user_agent: Optional[str] = None
-        if request is not None:
-            if request.client is not None:
-                ip_address = request.client.host
-            user_agent = request.headers.get("user-agent")
-
-        session = SessionInfo(
-            uid=uid,
-            ip_address=ip_address,
-            user_agent=user_agent,
-            device_info=device_info,
-        )
-
-        if self._session_store is not None:
-            await self._session_store.create(session)
-
-        return session
+        return await self._session_service.create_session(uid=uid, request=request, device_info=device_info)
 
     async def list_sessions(self, uid: str) -> list[SessionInfo]:
         """List all active sessions for a user.
@@ -1221,9 +1141,7 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
         Returns:
             List of active ``SessionInfo`` objects.
         """
-        if self._session_store is None:
-            return []
-        return await self._session_store.list_by_user(uid)
+        return await self._session_service.list_sessions(uid=uid)
 
     async def revoke_session(self, session_id: str) -> None:
         """Revoke a single session by ID.
@@ -1231,8 +1149,7 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
         Args:
             session_id: The session to revoke.
         """
-        if self._session_store is not None:
-            await self._session_store.delete(session_id)
+        await self._session_service.revoke_session(session_id=session_id)
 
     async def revoke_all_sessions(self, uid: str) -> None:
         """Revoke all sessions for a user.
@@ -1240,8 +1157,7 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
         Args:
             uid: User identifier.
         """
-        if self._session_store is not None:
-            await self._session_store.delete_all_by_user(uid)
+        await self._session_service.revoke_all_sessions(uid=uid)
 
     async def get_session(self, session_id: str) -> Optional[SessionInfo]:
         """Retrieve a session by ID.
@@ -1252,6 +1168,4 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
         Returns:
             The ``SessionInfo`` if found and active, otherwise None.
         """
-        if self._session_store is None:
-            return None
-        return await self._session_store.get(session_id)
+        return await self._session_service.get_session(session_id=session_id)

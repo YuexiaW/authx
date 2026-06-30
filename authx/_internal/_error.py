@@ -9,6 +9,20 @@ from authx import exceptions
 class _ErrorHandler:
     """Base Handler for FastAPI handling AuthX exceptions."""
 
+    async def __call__(
+        self,
+        request: Request,
+        exc: Exception,
+        status_code: int,
+        message: Optional[str],
+    ) -> JSONResponse:
+        """Make the handler callable for backward compatibility.
+
+        Delegates to ``_error_handler`` so that ``authx._error_handler(...)``
+        continues to work after the composition refactor.
+        """
+        return await self._error_handler(request, exc, status_code, message)
+
     MSG_TokenError = "Token Error"
     MSG_MissingTokenError = "Missing JWT in request"
     MSG_MissingCSRFTokenError = None  # Use detailed exception message
@@ -130,12 +144,21 @@ class _ErrorHandler:
         exception_handlers[exceptions.RateLimitExceeded] = rate_limit_wrapper
 
     def ensure_request_exception_handlers(self, request: Request) -> None:
-        """Install default AuthX handlers for the active request if the app has none.
+        """Install AuthX exception handlers for the current request scope.
 
-        FastAPI exception handlers are normally registered with ``handle_errors(app)``.
-        Minimal apps that omit it should still return HTTP auth errors instead of
-        leaking AuthX exceptions as 500 responses.
+        FastAPI exception handlers should be registered with ``handle_errors(app)``
+        at startup.  This method provides a backward-compatible safety net for
+        minimal apps that omit that call.
+
+        To avoid redundant work when multiple auth dependencies fire on the same
+        request (``token_required``, ``scopes_required``, ``get_current_subject``
+        etc.) the registration is gated by a per-request scope flag so the 15+
+        handler chain runs at most **once per request**.
         """
+        if request.scope.get("_authx_handlers_configured"):
+            return
+        request.scope["_authx_handlers_configured"] = True
+
         # Register subclasses before their parent classes so detailed handlers win
         # during Starlette's MRO-based exception lookup.
         self._set_request_exception_handler(

@@ -62,6 +62,7 @@ def init_app(config: Optional[AuthXConfig] = None) -> "tuple[FastAPI, AuthX]":
     """Initialize FastAPI app and AuthX instance."""
     app = FastAPI()
     security = AuthX(config=(config or AuthXConfig()))
+    security.handle_errors(app)
 
     return app, security
 

@@ -80,7 +80,7 @@ class RateLimiter:
         self,
         max_requests: int = 10,
         window: int = 60,
-        backend: Optional[Any] = None,
+        backend: Optional[RateLimitBackend] = None,
         key_func: Optional[Callable[[Request], Union[str, Any]]] = None,
     ) -> None:
         """Initialize the rate limiter.
@@ -93,7 +93,7 @@ class RateLimiter:
         """
         self.max_requests = max_requests
         self.window = window
-        self.backend: Any = backend or InMemoryBackend()
+        self.backend: RateLimitBackend = backend or InMemoryBackend()
         self.key_func = key_func or _default_key_func
 
     async def __call__(self, request: Request) -> None:

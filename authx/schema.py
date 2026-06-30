@@ -69,7 +69,7 @@ class TokenPayload(BaseModel):
     exp: Optional[DateTimeExpression] = None
     nbf: Optional[Union[Numeric, DateTimeExpression]] = None
     iat: Optional[Union[Numeric, DateTimeExpression]] = Field(default_factory=lambda: int(get_now_ts()))
-    type: Optional[str] = Field(
+    type: TokenType = Field(
         default="access",
         description="Token type",
     )
@@ -233,11 +233,7 @@ class TokenPayload(BaseModel):
             uid=str(self.sub),
             jti=self.jti,
             issued=self.iat,
-            # TODO: Fix type hinting for `type` Field
-            # it's caused because Type is a string & what we expect is a TokenType
-            # TokenType = Literal["access", "refresh"]
-            # Investigate if it's possible to fix this
-            type=self.type,  # type: ignore
+            type=self.type,
             expiry=self.exp,
             fresh=self.fresh,
             csrf=self.csrf,
@@ -379,7 +375,13 @@ class RequestToken(BaseModel):
                 audience=audience,
                 issuer=issuer,
             )
+            # Strip the type before validation so an arbitrary JWT claim
+            # (e.g. "false") doesn't cause model_validate to reject the
+            # entire payload.  Type correctness is enforced below via
+            # the explicit verify_type check.
+            token_type = decoded_token.pop("type", "access")
             payload = TokenPayload.model_validate(decoded_token)
+            payload.type = token_type  # type: ignore[assignment]
         except ValidationError as e:
             raise JWTDecodeError(*e.args) from e
 
