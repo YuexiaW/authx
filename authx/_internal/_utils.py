@@ -38,6 +38,34 @@ def get_uuid() -> str:
     return str(uuid.uuid4())
 
 
+def normalize_timestamp(
+    value: Union["datetime", "timedelta", float, int],
+    now: "Optional[datetime]" = None,
+) -> float:
+    """Normalize a time expression to a Unix timestamp (float).
+
+    Accepts ``datetime``, ``timedelta``, ``float``, or ``int`` and returns
+    a UTC Unix timestamp. A ``timedelta`` is added to *now* (defaults to
+    the current UTC time) before converting.
+
+    Args:
+        value: A time expression to normalize.
+        now: Reference datetime for ``timedelta`` inputs. Defaults to UTC now.
+
+    Returns:
+        A Unix timestamp as a float.
+    """
+    if isinstance(value, datetime):
+        return value.timestamp()
+    if isinstance(value, timedelta):
+        if now is None:
+            now = get_now()
+        return (now + value).timestamp()
+    if isinstance(value, (float, int)):
+        return float(value)
+    raise TypeError(f"Unsupported timestamp type: {type(value).__name__}")
+
+
 def time_diff(dt1: datetime, dt2: datetime) -> relativedelta:
     return relativedelta(dt1, dt2)
 

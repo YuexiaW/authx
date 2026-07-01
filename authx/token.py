@@ -14,7 +14,7 @@ from jwt.exceptions import (
     InvalidTokenError,
 )
 
-from authx._internal._utils import RESERVED_CLAIMS, get_now, get_now_ts, get_uuid
+from authx._internal._utils import RESERVED_CLAIMS, get_now, get_now_ts, get_uuid, normalize_timestamp
 from authx.exceptions import (
     AuthxArgumentDeprecationWarning,
     JWTDecodeError,
@@ -74,31 +74,21 @@ def create_token(
     elif isinstance(csrf, str):
         jwt_claims["csrf"] = csrf
 
-    if isinstance(issued, datetime.datetime):
-        jwt_claims["iat"] = issued.timestamp()
-    elif isinstance(issued, (float, int)):
-        jwt_claims["iat"] = issued
+    if issued is not None:
+        jwt_claims["iat"] = normalize_timestamp(issued)
     else:
         jwt_claims["iat"] = get_now_ts()
 
-    if isinstance(expiry, datetime.datetime):
-        jwt_claims["exp"] = expiry.timestamp()
-    elif isinstance(expiry, datetime.timedelta):
-        jwt_claims["exp"] = (now + expiry).timestamp()
-    elif isinstance(expiry, (float, int)):
-        jwt_claims["exp"] = expiry
+    if expiry is not None:
+        jwt_claims["exp"] = normalize_timestamp(expiry, now)
 
     if audience:
         jwt_claims["aud"] = audience
     if issuer:
         jwt_claims["iss"] = issuer
 
-    if isinstance(not_before, datetime.datetime):
-        jwt_claims["nbf"] = not_before.timestamp()
-    elif isinstance(not_before, datetime.timedelta):
-        jwt_claims["nbf"] = (now + not_before).timestamp()
-    elif isinstance(not_before, (int, float)):
-        jwt_claims["nbf"] = not_before
+    if not_before is not None:
+        jwt_claims["nbf"] = normalize_timestamp(not_before, now)
 
     if data:
         jwt_claims.update(data)

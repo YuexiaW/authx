@@ -12,7 +12,7 @@ from typing import (
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from authx._internal._scopes import has_required_scopes
-from authx._internal._utils import get_now, get_now_ts, get_uuid
+from authx._internal._utils import get_now, get_now_ts, get_uuid, normalize_timestamp
 from authx.exceptions import (
     AccessTokenRequiredError,
     CSRFError,
@@ -155,12 +155,10 @@ class TokenPayload(BaseModel):
 
     @field_validator("exp", "nbf", mode="before")
     @classmethod
-    def _set_default_ts(cls, value: Union[float, int, datetime.datetime, datetime.timedelta]) -> Union[float, int]:
-        if isinstance(value, datetime.datetime):
-            return value.timestamp()
-        elif isinstance(value, datetime.timedelta):
-            return (get_now() + value).timestamp()
-        return value
+    def _set_default_ts(cls, value: Union[float, int, datetime.datetime, datetime.timedelta, None]) -> Any:
+        if value is None:
+            return None
+        return normalize_timestamp(value)
 
     def has_scopes(self, *scopes: str, all_required: bool = True) -> bool:
         """Check if the token contains the specified scopes.
@@ -226,6 +224,8 @@ class TokenPayload(BaseModel):
         token_data = data.copy() if data else {}
         if self.scopes is not None:
             token_data["scopes"] = self.scopes
+        if self.login_type is not None:
+            token_data["login_type"] = self.login_type
 
         return create_token(
             key=key,
