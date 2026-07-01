@@ -63,6 +63,54 @@ class TestInMemoryBackend:
         assert "old" not in backend._store
         assert "new" in backend._store
 
+    @pytest.mark.asyncio
+    async def test_max_entries_evicts_oldest(self):
+        backend = InMemoryBackend(max_entries=2)
+        await backend.increment("key1", window=60)
+        await backend.increment("key2", window=60)
+        # key3 should evict the oldest (key1)
+        await backend.increment("key3", window=60)
+        assert "key1" not in backend._store
+        assert "key2" in backend._store
+        assert "key3" in backend._store
+
+    @pytest.mark.asyncio
+    async def test_max_entries_preserves_current_key(self):
+        """The key being incremented is never chosen as the eviction victim."""
+        backend = InMemoryBackend(max_entries=1)
+        # With max_entries=1, each new key forces eviction of the existing one.
+        # The current key being incremented always survives.
+        await backend.increment("key1", window=60)
+        await backend.increment("key2", window=60)  # evicts key1
+        await backend.increment("key1", window=60)  # evicts key2, keeps key1
+        assert "key1" in backend._store
+        assert "key2" not in backend._store
+
+    @pytest.mark.asyncio
+    async def test_max_entries_none_allows_unlimited(self):
+        backend = InMemoryBackend(max_entries=None)
+        for i in range(1000):
+            await backend.increment(f"key{i}", window=60)
+        assert len(backend._store) == 1000
+
+    @pytest.mark.asyncio
+    async def test_lazy_cleanup_removes_expired_entries(self):
+        """After 100 increments with expired windows, stale keys are swept."""
+        backend = InMemoryBackend()
+        # Insert entries with expired timestamps
+        for i in range(50):
+            backend._store[f"stale_{i}"] = (1, 0.0)
+        backend._store["active"] = (1, float("inf"))
+
+        # Trigger lazy cleanup by running 100 increment ops
+        for _ in range(100):
+            await backend.increment("trigger", window=1)
+
+        # Stale keys should be gone
+        for i in range(50):
+            assert f"stale_{i}" not in backend._store
+        assert "active" in backend._store
+
 
 class TestDefaultKeyFunc:
     """Tests for the default key extraction function."""

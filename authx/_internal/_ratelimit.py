@@ -31,19 +31,47 @@ class InMemoryBackend:
 
     Suitable for single-process deployments. For multi-worker setups,
     implement ``RateLimitBackend`` with Redis or another shared store.
+
+    Args:
+        max_entries: Optional maximum number of tracked keys. When exceeded,
+            the oldest entry (by window start time) is evicted. Prevents
+            unbounded memory growth in long-running processes.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_entries: Optional[int] = None) -> None:
         self._store: dict[str, tuple[int, float]] = {}
+        self._max_entries = max_entries
+        self._ops_since_cleanup = 0
 
     async def increment(self, key: str, window: int) -> int:
         now = time.monotonic()
+
+        # Periodic lazy cleanup: sweep expired entries every 100 operations
+        # to avoid unbounded accumulation of stale keys.
+        self._ops_since_cleanup += 1
+        if self._ops_since_cleanup >= 100:
+            self._cleanup(window)
+            self._ops_since_cleanup = 0
+
         entry = self._store.get(key)
         if entry is None or now - entry[1] >= window:
             self._store[key] = (1, now)
-            return 1
-        count = entry[0] + 1
-        self._store[key] = (count, entry[1])
+            count = 1
+        else:
+            count = entry[0] + 1
+            self._store[key] = (count, entry[1])
+
+        # Enforce max_entries cap: evict the oldest entry that is not the
+        # key we just updated, so the current operation is never disrupted.
+        if self._max_entries is not None and len(self._store) > self._max_entries:
+            oldest_key = min(
+                (k for k in self._store if k != key),
+                key=lambda k: self._store[k][1],
+                default=None,
+            )
+            if oldest_key is not None:
+                del self._store[oldest_key]
+
         return count
 
     async def reset(self, key: str) -> None:
