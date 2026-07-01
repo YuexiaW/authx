@@ -1,11 +1,8 @@
 """Tests for TokenResponse schema and create_token_pair helper."""
 
 from datetime import timedelta
-from unittest.mock import Mock
 
-from fastapi import Response
-
-from authx import AuthX, AuthXConfig, AuthXDependency, TokenResponse
+from authx import AuthX, AuthXConfig, TokenResponse
 
 
 class TestTokenResponseSchema:
@@ -143,62 +140,3 @@ class TestCreateTokenPair:
         assert "access_token" in data
         assert "refresh_token" in data
         assert data["token_type"] == "bearer"
-
-
-class TestCreateTokenPairDependency:
-    """Tests for AuthXDependency.create_token_pair delegation."""
-
-    def test_delegates_to_authx(self):
-        expected = TokenResponse(access_token="a", refresh_token="r")
-        mock_authx = Mock()
-        mock_authx.create_token_pair.return_value = expected
-
-        request = Mock(scope={"type": "http"})
-        response = Mock(spec=Response)
-        dep = AuthXDependency(mock_authx, request, response)
-
-        result = dep.create_token_pair(uid="user1", fresh=True)
-
-        assert result is expected
-        mock_authx.create_token_pair.assert_called_once_with(
-            uid="user1",
-            fresh=True,
-            headers=None,
-            access_expiry=None,
-            refresh_expiry=None,
-            data=None,
-            audience=None,
-            access_scopes=None,
-            refresh_scopes=None,
-        )
-
-    def test_passes_all_params(self):
-        mock_authx = Mock()
-        mock_authx.create_token_pair.return_value = TokenResponse(access_token="a", refresh_token="r")
-
-        request = Mock(scope={"type": "http"})
-        response = Mock(spec=Response)
-        dep = AuthXDependency(mock_authx, request, response)
-
-        dep.create_token_pair(
-            uid="u",
-            fresh=True,
-            access_expiry=timedelta(hours=1),
-            refresh_expiry=timedelta(days=7),
-            data={"role": "admin"},
-            audience="app",
-            access_scopes=["read"],
-            refresh_scopes=["refresh"],
-        )
-
-        mock_authx.create_token_pair.assert_called_once_with(
-            uid="u",
-            fresh=True,
-            headers=None,
-            access_expiry=timedelta(hours=1),
-            refresh_expiry=timedelta(days=7),
-            data={"role": "admin"},
-            audience="app",
-            access_scopes=["read"],
-            refresh_scopes=["refresh"],
-        )

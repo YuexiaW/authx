@@ -5,7 +5,6 @@ __version__ = "1.7.1"
 from authx._internal._ratelimit import RateLimiter
 from authx._internal._session import SessionInfo
 from authx.config import AuthXConfig
-from authx.dependencies import AuthXDependency
 from authx.exceptions import (
     InsufficientScopeError,
     JWTDecodeError,
@@ -36,7 +35,6 @@ __all__ = (
     "TokenResponse",
     "AuthX",
     "AuthManager",
-    "AuthXDependency",
     "InsufficientScopeError",
     "JWTDecodeError",
     "LoginTypeMismatchError",

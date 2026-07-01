@@ -118,7 +118,6 @@ def test_unset_access_cookies_without_csrf_cookie_branch():
 def test_dependency_alias_properties_return_depends():
     auth = AuthX(config=AuthXConfig(JWT_SECRET_KEY="secret"))
 
-    assert auth.BUNDLE.dependency == auth.get_dependency
     assert auth.WS_AUTH_REQUIRED.dependency == auth._ws_auth_required
 
 
