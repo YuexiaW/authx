@@ -21,23 +21,24 @@ class _CallbackHandler(Generic[T]):
         AttributeError: If callback is not set
     """
 
-    def __init__(self, model: Optional[T] = None) -> None:
+    def __init__(
+        self,
+        model: Optional[T] = None,
+        model_callback: Optional[ModelCallback[T]] = None,
+        token_callback: Optional[TokenCallback] = None,
+    ) -> None:
         """Base class for callback handlers in AuthX.
 
         Args:
-            model (T): Model instance
+            model: Model instance for type context.
+            model_callback: Optional callback for model/subject retrieval
+                (injected at construction, avoiding a separate setter call).
+            token_callback: Optional callback for token blocklist validation
+                (injected at construction, avoiding a separate setter call).
         """
         self._model: Optional[T] = model
-        self.callback_get_model_instance: Optional[ModelCallback[T]] = None
-        self.callback_is_token_in_blocklist: Optional[TokenCallback] = None
-
-        # Exceptions
-        self._callback_model_set_exception = AttributeError(
-            f"Model callback not set for {self._model.__class__.__name__} instance"
-        )
-        self._callback_token_set_exception = AttributeError(
-            f"Token callback not set for {self._model.__class__.__name__} instance"
-        )
+        self.callback_get_model_instance: Optional[ModelCallback[T]] = model_callback
+        self.callback_is_token_in_blocklist: Optional[TokenCallback] = token_callback
 
     @property
     def is_model_callback_set(self) -> bool:
@@ -54,7 +55,8 @@ class _CallbackHandler(Generic[T]):
         if self.is_model_callback_set:
             return True
         if not ignore_errors:
-            raise self._callback_model_set_exception
+            name = self._model.__class__.__name__ if self._model is not None else "NoneType"
+            raise AttributeError(f"Model callback not set for {name} instance")
         return False
 
     def _check_token_callback_is_set(self, ignore_errors: bool = False) -> bool:
@@ -62,7 +64,8 @@ class _CallbackHandler(Generic[T]):
         if self.is_token_callback_set:
             return True
         if not ignore_errors:
-            raise self._callback_token_set_exception
+            name = self._model.__class__.__name__ if self._model is not None else "NoneType"
+            raise AttributeError(f"Token callback not set for {name} instance")
         return False
 
     def set_callback_get_model_instance(self, callback: ModelCallback[T]) -> None:

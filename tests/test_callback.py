@@ -19,6 +19,31 @@ def test_callback_handler_initialization():
     assert handler.callback_is_token_in_blocklist is None
 
 
+@pytest.mark.asyncio
+async def test_callback_handler_constructor_injection():
+    """Callbacks can be injected via constructor, avoiding a separate setter call."""
+
+    def model_cb(uid: str, **kwargs):
+        return DummyModel(uid) if uid else None
+
+    def token_cb(token: str, **kwargs):
+        return token == "blocked"
+
+    handler = _CallbackHandler(model_callback=model_cb, token_callback=token_cb)
+
+    assert handler.callback_get_model_instance is model_cb
+    assert handler.callback_is_token_in_blocklist is token_cb
+    assert handler.is_model_callback_set
+    assert handler.is_token_callback_set
+
+    subject = await handler._get_current_subject("alice")
+    assert isinstance(subject, DummyModel)
+    assert subject.id == "alice"
+
+    assert await handler.is_token_in_blocklist("blocked")
+    assert not await handler.is_token_in_blocklist("allowed")
+
+
 def test_set_and_check_callbacks():
     handler = _CallbackHandler()
 
