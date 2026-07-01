@@ -1,5 +1,6 @@
 """Tests for session management support."""
 
+import datetime
 from unittest.mock import Mock
 
 import pytest
@@ -119,6 +120,96 @@ class TestInMemorySessionStore:
         await store.delete_all_by_user("user1")
         assert len(await store.list_by_user("user1")) == 0
         assert len(await store.list_by_user("user2")) == 1
+
+
+class TestInMemorySessionStoreTTL:
+    """Tests for TTL expiry and max_sessions in InMemorySessionStore."""
+
+    @pytest.mark.asyncio
+    async def test_ttl_expired_session_returns_none(self):
+        store = InMemorySessionStore(session_ttl=datetime.timedelta(minutes=30))
+        s = SessionInfo(uid="user1")
+        await store.create(s)
+
+        # Manually set last_active to 31 minutes ago
+        past = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=31)
+        object.__setattr__(s, "last_active", past)
+
+        assert await store.get(s.session_id) is None
+
+    @pytest.mark.asyncio
+    async def test_ttl_active_session_returns_session(self):
+        store = InMemorySessionStore(session_ttl=datetime.timedelta(minutes=30))
+        s = SessionInfo(uid="user1")
+        await store.create(s)
+
+        assert await store.get(s.session_id) is not None
+
+    @pytest.mark.asyncio
+    async def test_ttl_expired_session_excluded_from_list_by_user(self):
+        store = InMemorySessionStore(session_ttl=datetime.timedelta(minutes=30))
+        s = SessionInfo(uid="user1")
+        await store.create(s)
+
+        past = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=31)
+        object.__setattr__(s, "last_active", past)
+
+        sessions = await store.list_by_user("user1")
+        assert len(sessions) == 0
+
+    @pytest.mark.asyncio
+    async def test_no_ttl_never_expires(self):
+        store = InMemorySessionStore()
+        s = SessionInfo(uid="user1")
+        await store.create(s)
+
+        past = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=365)
+        object.__setattr__(s, "last_active", past)
+
+        assert await store.get(s.session_id) is not None
+
+    @pytest.mark.asyncio
+    async def test_max_sessions_evicts_oldest(self):
+        store = InMemorySessionStore(max_sessions=3)
+        s1 = SessionInfo(uid="user1")
+        s2 = SessionInfo(uid="user2")
+        s3 = SessionInfo(uid="user3")
+
+        await store.create(s1)
+        await store.create(s2)
+        await store.create(s3)
+
+        # s4 should evict the oldest (s1 if all have same last_active)
+        s4 = SessionInfo(uid="user4")
+        await store.create(s4)
+
+        assert await store.get(s1.session_id) is None
+        assert await store.get(s2.session_id) is not None
+        assert await store.get(s3.session_id) is not None
+        assert await store.get(s4.session_id) is not None
+        assert len(store._sessions) == 3
+
+    @pytest.mark.asyncio
+    async def test_max_sessions_zero_is_unlimited(self):
+        store = InMemorySessionStore(max_sessions=0)
+        for i in range(100):
+            await store.create(SessionInfo(uid=f"user{i}"))
+        assert len(store._sessions) == 100
+
+    @pytest.mark.asyncio
+    async def test_cleanup_removes_expired(self):
+        store = InMemorySessionStore(session_ttl=datetime.timedelta(minutes=30))
+        s1 = SessionInfo(uid="user1")
+        s2 = SessionInfo(uid="user2")
+        await store.create(s1)
+        await store.create(s2)
+
+        past = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=31)
+        object.__setattr__(s1, "last_active", past)
+
+        removed = await store.cleanup()
+        assert removed == 1
+        assert await store.get(s2.session_id) is not None
 
 
 class TestAuthXSessionManagement:
