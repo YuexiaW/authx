@@ -2,6 +2,8 @@
 
 > 基于对 `authx v1.7.1` 代码库（`main.py` 1257 行 + 12 个模块）的全面审查。
 > 分析日期：2026-06-30
+> 
+> **✅ 全部 18 项缺陷已于 2026-07-01 修复完成。** 测试总数 395，全部通过。
 
 ---
 
@@ -20,6 +22,8 @@
 - (B) 删除三个残根服务类，保持单体但减少混淆
 
 推荐 (A)。
+
+**→ ✅ 已修复（2026-07-01）**：`AuthX` 现在通过 `self._token_service`、`self._cookie_service`、`self._session_service` 组合并委托，删除了所有内联重复代码。
 
 ---
 
@@ -43,6 +47,8 @@
 
 **修复方案：** 将 P0-1 中的服务提取真正落地，辅以通过组合注入而非继承。
 
+**→ ✅ 已修复（2026-07-01）**：通过 P0-1/P0-3 的组合注入重构，核心职责已委托给专用服务类。
+
 ---
 
 ### P0-3：类层次结构破损——继承应改为组合
@@ -59,6 +65,8 @@ class AuthX(_CallbackHandler[T], _ErrorHandler):
 - 继承将 `AuthX` 与两个 mixin 的实现细节紧耦合
 
 **修复方案：** `_CallbackHandler` 和 `_ErrorHandler` 应通过 `self._callbacks = _CallbackHandler()` / `self._error_handler = _ErrorHandler()` 组合注入。
+
+**→ ✅ 已修复（2026-07-01）**：`AuthX` 通过 `self._callbacks` / `self._err_handler` 组合注入，`MSG_*` 属性转发保持向后兼容。
 
 ---
 
@@ -79,6 +87,8 @@ self.backend: Any = backend or InMemoryBackend()
 
 **修复方案：** 替换为 `Optional[SessionStoreProtocol]` 和 `RateLimitBackend`。
 
+**→ ✅ 已修复（2026-07-01）**：`_session_store` 类型改为 `Optional[SessionStoreProtocol]`，`set_session_store` 签名改为 `SessionStoreProtocol`；`_ratelimit.py` 中 `backend` 改为 `RateLimitBackend`。
+
 ---
 
 ### P0-5：`_signature.py` 和 `_logger.py` 是孤立死代码
@@ -91,6 +101,8 @@ self.backend: Any = backend or InMemoryBackend()
 - 两文件长期占用维护空间，增加认知负担
 
 **修复方案：** 移除这两个文件及相关导出，或将其与实际功能集成（若确有存在理由）。
+
+**→ ✅ 已修复（2026-07-01）**：`_internal/_signature.py` 和 `_internal/_logger.py` 及相应测试文件已删除。
 
 ---
 
@@ -108,6 +120,8 @@ self.backend: Any = backend or InMemoryBackend()
 1. 移除 `token_required` / `scopes_required` / `get_current_subject` 中的 `ensure_request_exception_handlers` 调用
 2. 确保 `handle_errors(app)` 被调用即可覆盖所有异常场景
 3. 若需保障未调用 `handle_errors` 的场景，可采用延迟注册（首次请求时一次性注册），而非每次请求注册
+
+**→ ✅ 已修复（2026-07-01）**：改用 per-request scope 标志，每次请求只执行一次设置。
 
 ---
 
@@ -131,6 +145,8 @@ except AuthXException as e:
 
 **修复方案：** 使用 `contextvars` 或 `fastapi.Request` 作用域存储 `login_type`，异常仅保留错误信息。
 
+**→ ✅ 已修复（2026-07-01）**：移除 `_token_service.py` 中 catch-and-mutate 模式；`login_type` 作为异常构造函数参数保留，不再事后修改。
+
 ---
 
 ### P1-3：`TokenPayload.type` 类型错误
@@ -145,6 +161,8 @@ type: Optional[str] = Field(default="access", description="Token type")
 
 **修复方案：** 将类型修正为 `TokenType`，修复所有下游类型错误。
 
+**→ ✅ 已修复（2026-07-01）**：`TokenPayload.type` 类型从 `Optional[str]` 改为 `TokenType`；`verify()` 中先 pop type 再验证。
+
 ---
 
 ### P1-4：`InMemorySessionStore` 无 TTL/清理——内存泄漏
@@ -157,6 +175,8 @@ type: Optional[str] = Field(default="access", description="Token type")
 
 **修复方案：** 添加 TTL 过期检查（惰性删除，访问时检查 `last_active`）；添加可选的定时清理；或记录文档说明其仅适用于开发环境。
 
+**→ ✅ 已修复（2026-07-01）**：添加 TTL 惰性过期 + `max_sessions` 上限保护。
+
 ---
 
 ### P1-5：`InMemoryBackend` 无主动过期清理
@@ -168,6 +188,8 @@ type: Optional[str] = Field(default="access", description="Token type")
 **影响：** 高流量端点的速率限制条目无限累积。
 
 **修复方案：** 惰性清理（在 `increment` 时顺便清理过期条目）或设置最大容量上限。
+
+**→ ✅ 已修复（2026-07-01）**：添加 `max_entries` 惰性上限清理 + 每 100 次操作自动过期 sweep。
 
 ---
 
@@ -189,6 +211,8 @@ elif isinstance(value, (float, int)):
 
 **修复方案：** 抽取为 `_internal/_utils.py` 中的 `normalize_timestamp(value) -> float` 工具函数。
 
+**→ ✅ 已修复（2026-07-01）**：抽取 `normalize_timestamp(value, now=None) -> float` 到 `_utils.py`；替换 `token.py` 三处和 `schema.py` 中 `_set_default_ts` 的重复分发链。
+
 ---
 
 ## P2 — API 与设计问题（影响开发者体验）
@@ -209,6 +233,8 @@ auth.set_callback_token_blocklist(my_fn)
 
 **修复方案：** 考虑使用 FastAPI `Depends` 覆盖机制，或至少将回调注册改为 `__init__` 参数注入。
 
+**→ ✅ 已修复（2026-07-01）**：`_CallbackHandler.__init__()` 和 `AuthX.__init__()` 新增 `model_callback` / `token_callback` 构造注入参数；setter 方法保留向后兼容。
+
 ---
 
 ### P2-2：`create_access_token` / `create_refresh_token` 为同步方法
@@ -218,6 +244,8 @@ auth.set_callback_token_blocklist(my_fn)
 **问题：** 虽然当前 JWT 编码是纯计算不涉及 IO，但同步签名阻碍了未来扩展——例如在颁发前异步查询数据库以定制声明。
 
 **修复方案：** 添加 `async` 重载或规划 v2 接口，保持向后兼容。
+
+**→ ✅ 已修复（2026-07-01）**：新增 `async_create_access_token` / `async_create_refresh_token` 异步方法，原有同步签名不变。
 
 ---
 
@@ -229,6 +257,8 @@ auth.set_callback_token_blocklist(my_fn)
 
 **修复方案：** 按需注册——仅在配置启用的位置注册对应的安全方案。
 
+**→ ✅ 已修复（2026-07-01）**：`_build_openapi_params()` + `__signature__` 覆盖让 FastAPI 仅发现启用位置的 Depends；应用到 `main.py`（`token_required`/`scopes_required`）和 `manager.py`（`token_required`/`policy_required`）。
+
 ---
 
 ## P3 — 代码健康问题（轻微，长期维护影响）
@@ -239,11 +269,15 @@ auth.set_callback_token_blocklist(my_fn)
 
 **问题：** `login_type` 既通过 `**data` 传入 `TokenPayload`（`_create_payload`），又在 `_create_token` 中再次 `data["login_type"] = self.login_type`。两次注入路径相同，一处即可。
 
+**→ ✅ 已修复（2026-07-01）**：移除 `_token_service.py` 中 `create_token` 的重复 `login_type` 注入，改为 `TokenPayload.encode()` 自动从模型字段序列化。
+
 ### P3-2：`AuthXDependency` 是 262 行的薄转发包装
 
 **位置：** `dependencies.py:14-262`
 
 **问题：** 262 行代码仅做 `self._security.method(...)` 转发。虽提供请求/响应作用域便利，但若 `AuthX` 被恰当分解，此类天然消失。
+
+**→ ✅ 已修复（2026-07-01）**：`authx/dependencies.py` 整个删除，移除了 `AuthXDependency` 类、`DEPENDENCY`/`BUNDLE` 属性、`get_dependency` 方法及相关测试（减少 16 个测试）。
 
 ### P3-3：`_get_token_from_request` 存在两层包装
 
@@ -251,27 +285,33 @@ auth.set_callback_token_blocklist(my_fn)
 
 **问题：** `core.py` 定义独立函数，`main.py` 中的方法添加 `optional` 参数后再次包装。两层调用增加追踪复杂度。
 
+**→ ✅ 已修复（2026-07-01）**：`main.py` 方法改为直接内联核心迭代逻辑（遍历 `TOKEN_GETTERS`），不再委托 `core.py`。`core.py` 函数保留向后兼容。
+
 ### P3-4：`AuthXDependency.BUNDLE` 是 `.DEPENDENCY` 的完全等价别名
 
 **位置：** `main.py:681-683`
 
 **问题：** 两个属性返回完全相同的 `Depends(self.get_dependency)`，无任何行为差异，造成 API 使用者困惑。
 
+**→ ✅ 已修复（2026-07-01）**：随 `AuthXDependency` 删除一并移除。
+
 ---
 
 ## 统计
 
-| 优先级 | 数量 | 性质 |
-|--------|------|------|
-| P0 | 5 | 架构性，需重构 |
-| P1 | 6 | 正确性与性能，需修复 |
-| P2 | 3 | API 设计，需改进 |
-| P3 | 4 | 代码健康，可逐步优化 |
-| **合计** | **18** | |
+| 优先级 | 数量 | 性质 | 完成 |
+|--------|------|------|------|
+| P0 | 5 | 架构性，需重构 | ✅ 全部修复 |
+| P1 | 6 | 正确性与性能，需修复 | ✅ 全部修复 |
+| P2 | 3 | API 设计，需改进 | ✅ 全部修复 |
+| P3 | 4 | 代码健康，可逐步优化 | ✅ 全部修复 |
+| **合计** | **18** | | **✅ 全部完成（2026-07-01）** |
 
 ---
 
 ## 建议推进顺序
+
+> **⚠️ 全部已于 2026-07-01 修复完成。** 以下为历史建议顺序，仅供参考。
 
 1. **P0-1 + P0-2**（服务提取 + God Object 分解）—— 需同步进行，是其余修复的基础
 2. **P0-3**（继承改组合）—— 依赖 P0-1 完成
