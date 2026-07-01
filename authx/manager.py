@@ -1,5 +1,6 @@
 """AuthManager for multiple isolated AuthX contexts."""
 
+import inspect
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Optional
 
@@ -89,6 +90,28 @@ class AuthManager(_ErrorHandler):
         auth = self.get(login_type)
         return auth.create_access_token(uid, fresh, headers, expiry, data, audience, scopes, *args, **kwargs)
 
+    async def async_create_access_token(
+        self,
+        login_type: str,
+        uid: str,
+        fresh: bool = False,
+        headers: Optional[dict[str, Any]] = None,
+        expiry: Optional[DateTimeExpression] = None,
+        data: Optional[dict[str, Any]] = None,
+        audience: Optional[StringOrSequence] = None,
+        scopes: Optional[list[str]] = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> str:
+        """Async variant of :meth:`create_access_token` for a registered login type.
+
+        Currently delegates to the sync implementation. This async surface
+        exists so that subclasses or future versions can perform async work
+        without breaking callers that already ``await`` the method.
+        """
+        auth = self.get(login_type)
+        return await auth.async_create_access_token(uid, fresh, headers, expiry, data, audience, scopes, *args, **kwargs)
+
     def create_refresh_token(
         self,
         login_type: str,
@@ -104,6 +127,27 @@ class AuthManager(_ErrorHandler):
         """Create a refresh token for a registered login type."""
         auth = self.get(login_type)
         return auth.create_refresh_token(uid, headers, expiry, data, audience, scopes, *args, **kwargs)
+
+    async def async_create_refresh_token(
+        self,
+        login_type: str,
+        uid: str,
+        headers: Optional[dict[str, Any]] = None,
+        expiry: Optional[DateTimeExpression] = None,
+        data: Optional[dict[str, Any]] = None,
+        audience: Optional[StringOrSequence] = None,
+        scopes: Optional[list[str]] = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> str:
+        """Async variant of :meth:`create_refresh_token` for a registered login type.
+
+        Currently delegates to the sync implementation. This async surface
+        exists so that subclasses or future versions can perform async work
+        without breaking callers that already ``await`` the method.
+        """
+        auth = self.get(login_type)
+        return await auth.async_create_refresh_token(uid, headers, expiry, data, audience, scopes, *args, **kwargs)
 
     def create_token_pair(
         self,
@@ -131,6 +175,34 @@ class AuthManager(_ErrorHandler):
             refresh_scopes=refresh_scopes,
         )
 
+    def _build_openapi_params(
+        self,
+        login_type: str,
+        type: str = "access",
+        locations: Optional[TokenLocations] = None,
+    ) -> dict[str, inspect.Parameter]:
+        """Build OpenAPI signature params for enabled token locations only.
+
+        Delegates to the registered ``AuthX`` instance for the given login
+        type.  Falls back to a bare HTTPBearer scheme when the login type
+        hasn't been registered yet (``BadConfigurationError``).
+        """
+        try:
+            return self.get(login_type)._build_openapi_params(type=type, locations=locations)
+        except BadConfigurationError:
+            dep = Depends(HTTPBearer(
+                scheme_name="AuthXBearer",
+                bearerFormat="JWT",
+                description=_OPENAPI_BEARER_DESCRIPTION,
+                auto_error=False,
+            ))
+            return {
+                "_authx_openapi_header": inspect.Parameter(
+                    "_authx_openapi_header", inspect.Parameter.KEYWORD_ONLY,
+                    default=dep, annotation=Any,
+                ),
+            }
+
     def token_required(
         self,
         login_type: str,
@@ -141,20 +213,15 @@ class AuthManager(_ErrorHandler):
         locations: Optional[TokenLocations] = None,
     ) -> Callable[[Request], Awaitable[TokenPayload]]:
         """Dependency factory requiring a token for a specific login type."""
-        header_scheme, cookie_scheme, query_scheme = self._openapi_security_dependencies(
+        openapi_params = self._build_openapi_params(
             login_type=login_type,
             type=type,
             locations=locations,
         )
-        header_dependency = Depends(header_scheme)
-        cookie_dependency = Depends(cookie_scheme)
-        query_dependency = Depends(query_scheme)
 
         async def _auth_required(
             request: Request,
-            _authx_openapi_header: Any = header_dependency,
-            _authx_openapi_cookie: Any = cookie_dependency,
-            _authx_openapi_query: Any = query_dependency,
+            **extra: Any,
         ) -> TokenPayload:
             self.ensure_request_exception_handlers(request)
             return await self._auth_required(
@@ -167,6 +234,12 @@ class AuthManager(_ErrorHandler):
                 locations=locations,
             )
 
+        # Inject signature so FastAPI discovers Depends only for active locations
+        sig_params = [
+            inspect.Parameter("request", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Request),
+            *openapi_params.values(),
+        ]
+        _auth_required.__signature__ = inspect.Signature(sig_params)
         return _auth_required
 
     def _openapi_security_dependencies(
@@ -327,16 +400,11 @@ class AuthManager(_ErrorHandler):
         env: Optional[Mapping[str, Any]] = None,
     ) -> Callable[[Request], Awaitable[TokenPayload]]:
         """Dependency factory requiring policy authorization."""
-        header_scheme, cookie_scheme, query_scheme = self._openapi_security_dependencies(login_type=login_type)
-        header_dependency = Depends(header_scheme)
-        cookie_dependency = Depends(cookie_scheme)
-        query_dependency = Depends(query_scheme)
+        openapi_params = self._build_openapi_params(login_type=login_type)
 
         async def _policy_required(
             request: Request,
-            _authx_openapi_header: Any = header_dependency,
-            _authx_openapi_cookie: Any = cookie_dependency,
-            _authx_openapi_query: Any = query_dependency,
+            **extra: Any,
         ) -> TokenPayload:
             self.ensure_request_exception_handlers(request)
             return await self.authorize(
@@ -349,4 +417,10 @@ class AuthManager(_ErrorHandler):
                 env=env,
             )
 
+        # Inject signature so FastAPI discovers Depends only for active locations
+        sig_params = [
+            inspect.Parameter("request", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Request),
+            *openapi_params.values(),
+        ]
+        _policy_required.__signature__ = inspect.Signature(sig_params)
         return _policy_required

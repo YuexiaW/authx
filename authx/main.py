@@ -1,6 +1,7 @@
 """Main module for AuthX."""
 
 import contextlib
+import inspect
 from collections.abc import Awaitable, Coroutine
 from typing import (
     Any,
@@ -23,23 +24,22 @@ from authx._internal._scopes import has_required_scopes
 from authx._internal._session import SessionInfo
 from authx._internal._session_service import SessionService
 from authx._internal._token_service import TokenService
-from authx._internal._utils import get_uuid
 from authx.config import AuthXConfig
-from authx.core import _get_token_from_request
-from authx.dependencies import AuthXDependency
+from authx.core import TOKEN_GETTERS
 from authx.exceptions import (
     AuthXException,
     InsufficientScopeError,
-    JWTDecodeError,
     MissingTokenError,
     RevokedTokenError,
 )
 from authx.schema import RequestToken, TokenPayload, TokenResponse
 from authx.types import (
     DateTimeExpression,
+    ModelCallback,
     SessionStoreProtocol,
     StringOrSequence,
     T,
+    TokenCallback,
     TokenLocations,
     TokenType,
 )
@@ -82,16 +82,22 @@ class AuthX(Generic[T]):
         config: AuthXConfig = AuthXConfig(),
         model: Optional[T] = None,
         login_type: Optional[str] = None,
+        model_callback: Optional[ModelCallback[T]] = None,
+        token_callback: Optional[TokenCallback] = None,
     ) -> None:
         """AuthX base object.
 
         Args:
-            config (AuthXConfig, optional): Configuration instance to use. Defaults to AuthXConfig().
-            model (Optional[T], optional): Model type hint. Defaults to dict[str, Any].
-            login_type (Optional[str], optional): Explicit login type for manager-based auth contexts.
+            config: Configuration instance to use. Defaults to AuthXConfig().
+            model: Model type hint. Defaults to dict[str, Any].
+            login_type: Explicit login type for manager-based auth contexts.
+            model_callback: Optional callback for model/subject retrieval
+                (constructor injection, avoids a separate ``set_callback_*`` call).
+            token_callback: Optional callback for token blocklist validation
+                (constructor injection, avoids a separate ``set_callback_*`` call).
         """
         self.model: Union[T, dict[str, Any]] = model if model is not None else {}
-        self._callbacks = _CallbackHandler[T](model=model)
+        self._callbacks = _CallbackHandler[T](model=model, model_callback=model_callback, token_callback=token_callback)
         self._error_handler = _ErrorHandler()
         self._config = config
         self.login_type = login_type
@@ -288,19 +294,22 @@ class AuthX(Generic[T]):
         refresh: bool = False,
         optional: bool = False,
     ) -> Optional[RequestToken]:
-        # Use configured token locations if not explicitly provided
         if locations is None:
             locations = list(self.config.JWT_TOKEN_LOCATION)
+        errors: list[MissingTokenError] = []
         try:
-            # Directly call the internal function to get the token
-            return await _get_token_from_request(
-                request=request,
-                refresh=refresh,
-                locations=locations,
-                config=self.config,
-            )
+            for location in locations:
+                try:
+                    getter = TOKEN_GETTERS[location]
+                    token = await getter(request, self.config, refresh)
+                    if token is not None:
+                        return token
+                except MissingTokenError as e:
+                    errors.append(e)
+            if errors:
+                raise MissingTokenError(*(str(err) for err in errors))
+            raise MissingTokenError(f"No token found in request from '{locations}'")
         except MissingTokenError:
-            # Return None if optional, else propagate the exception
             if optional:
                 return None
             raise
@@ -448,6 +457,27 @@ class AuthX(Generic[T]):
             scopes=scopes,
         )
 
+    async def async_create_access_token(
+        self,
+        uid: str,
+        fresh: bool = False,
+        headers: Optional[dict[str, Any]] = None,
+        expiry: Optional[DateTimeExpression] = None,
+        data: Optional[dict[str, Any]] = None,
+        audience: Optional[StringOrSequence] = None,
+        scopes: Optional[list[str]] = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> str:
+        """Async variant of :meth:`create_access_token`.
+
+        Currently delegates to the sync implementation. This async surface
+        exists so that subclasses or future versions can perform async work
+        (e.g. database queries for custom claims) without breaking callers
+        that already ``await`` the method.
+        """
+        return self.create_access_token(uid, fresh, headers, expiry, data, audience, scopes, *args, **kwargs)
+
     def create_refresh_token(
         self,
         uid: str,
@@ -481,6 +511,26 @@ class AuthX(Generic[T]):
             audience=audience,
             scopes=scopes,
         )
+
+    async def async_create_refresh_token(
+        self,
+        uid: str,
+        headers: Optional[dict[str, Any]] = None,
+        expiry: Optional[DateTimeExpression] = None,
+        data: Optional[dict[str, Any]] = None,
+        audience: Optional[StringOrSequence] = None,
+        scopes: Optional[list[str]] = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> str:
+        """Async variant of :meth:`create_refresh_token`.
+
+        Currently delegates to the sync implementation. This async surface
+        exists so that subclasses or future versions can perform async work
+        (e.g. database queries for custom claims) without breaking callers
+        that already ``await`` the method.
+        """
+        return self.create_refresh_token(uid, headers, expiry, data, audience, scopes, *args, **kwargs)
 
     def create_token_pair(
         self,
@@ -601,23 +651,7 @@ class AuthX(Generic[T]):
         """
         self._cookie_service.unset_cookies_all(response=response)
 
-    # Notes:
-    # The AuthXDeps is a utility class, to enable quick token operations
-    # within the route logic. It provides methods to avoid additional code
-    # in your route that would be outside of the route logic
-
-    # Such methods includes setting and unsetting cookies without the need
-    # to generate a response object beforehand.
-
-    @property
-    def DEPENDENCY(self) -> AuthXDependency[Any]:
-        """FastAPI Dependency to return an AuthX sub-object within the route context."""
-        return Depends(self.get_dependency)
-
-    @property
-    def BUNDLE(self) -> AuthXDependency[Any]:
-        """FastAPI Dependency to return a AuthX sub-object within the route context."""
-        return self.DEPENDENCY
+    # --- Standard FastAPI dependency properties ---
 
     @property
     def FRESH_REQUIRED(self) -> TokenPayload:
@@ -696,26 +730,6 @@ class AuthX(Generic[T]):
             raise RevokedTokenError("Token has been revoked", login_type=self.login_type)
         return self.verify_token(request_token, verify_type=True, verify_fresh=False, verify_csrf=False)
 
-    def get_dependency(self, request: Request, response: Response) -> AuthXDependency[Any]:
-        """FastAPI Dependency to return a AuthX sub-object within the route context.
-
-        Args:
-            request (Request): Request context managed by FastAPI
-            response (Response): Response context managed by FastAPI
-
-        Note:
-            The AuthXDeps is a utility class, to enable quick token operations
-            within the route logic. It provides methods to avoid additional code
-            in your route that would be outside of the route logic
-
-            Such methods includes setting and unsetting cookies without the need
-            to generate a response object beforehand
-
-        Returns:
-            AuthXDeps: The contextful AuthX object
-        """
-        return AuthXDependency(self, request=request, response=response)
-
     def _openapi_header_security_scheme(self) -> Callable[..., Any]:
         if self.config.JWT_HEADER_NAME.lower() == "authorization" and self.config.JWT_HEADER_TYPE.lower() == "bearer":
             return HTTPBearer(
@@ -766,6 +780,41 @@ class AuthX(Generic[T]):
             self._openapi_query_security_scheme() if "query" in effective_locations else _noop_openapi_security,
         )
 
+    def _build_openapi_params(
+        self,
+        type: str = "access",
+        locations: Optional[TokenLocations] = None,
+    ) -> dict[str, inspect.Parameter]:
+        """Build OpenAPI signature params for enabled token locations only.
+
+        Returns a dict of ``inspect.Parameter`` objects keyed by parameter name,
+        containing ``Depends(...)`` defaults for the security schemes of
+        token locations that are actually enabled in the config.  The caller
+        applies these to the dependency function's ``__signature__`` so that
+        FastAPI only discovers security schemes for truly active locations.
+        """
+        effective = locations if locations is not None else self.config.JWT_TOKEN_LOCATION
+        result: dict[str, inspect.Parameter] = {}
+        if "headers" in effective:
+            dep = Depends(self._openapi_header_security_scheme())
+            result["_authx_openapi_header"] = inspect.Parameter(
+                "_authx_openapi_header", inspect.Parameter.KEYWORD_ONLY,
+                default=dep, annotation=Any,
+            )
+        if "cookies" in effective:
+            dep = Depends(self._openapi_cookie_security_scheme(type))
+            result["_authx_openapi_cookie"] = inspect.Parameter(
+                "_authx_openapi_cookie", inspect.Parameter.KEYWORD_ONLY,
+                default=dep, annotation=Any,
+            )
+        if "query" in effective:
+            dep = Depends(self._openapi_query_security_scheme())
+            result["_authx_openapi_query"] = inspect.Parameter(
+                "_authx_openapi_query", inspect.Parameter.KEYWORD_ONLY,
+                default=dep, annotation=Any,
+            )
+        return result
+
     def token_required(
         self,
         type: str = "access",
@@ -786,19 +835,11 @@ class AuthX(Generic[T]):
         Returns:
             Callable[[Request], TokenPayload]: Dependency for Valid token Payload retrieval
         """
-        header_scheme, cookie_scheme, query_scheme = self._openapi_security_dependencies(
-            type=type,
-            locations=locations,
-        )
-        header_dependency = Depends(header_scheme)
-        cookie_dependency = Depends(cookie_scheme)
-        query_dependency = Depends(query_scheme)
+        openapi_params = self._build_openapi_params(type=type, locations=locations)
 
         async def _auth_required(
             request: Request,
-            _authx_openapi_header: Any = header_dependency,
-            _authx_openapi_cookie: Any = cookie_dependency,
-            _authx_openapi_query: Any = query_dependency,
+            **extra: Any,
         ) -> Any:
             self._error_handler.ensure_request_exception_handlers(request)
             return await self._auth_required(
@@ -810,6 +851,12 @@ class AuthX(Generic[T]):
                 locations=locations,
             )
 
+        # Inject signature so FastAPI discovers Depends only for active locations
+        sig_params = [
+            inspect.Parameter("request", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Request),
+            *openapi_params.values(),
+        ]
+        _auth_required.__signature__ = inspect.Signature(sig_params)
         return _auth_required
 
     @property
@@ -892,19 +939,11 @@ class AuthX(Generic[T]):
             ```
         """
         required_scopes = list(scopes)
-        header_scheme, cookie_scheme, query_scheme = self._openapi_security_dependencies(
-            type="access",
-            locations=locations,
-        )
-        header_dependency = Depends(header_scheme)
-        cookie_dependency = Depends(cookie_scheme)
-        query_dependency = Depends(query_scheme)
+        openapi_params = self._build_openapi_params(type="access", locations=locations)
 
         async def _scopes_required(
             request: Request,
-            _authx_openapi_header: Any = header_dependency,
-            _authx_openapi_cookie: Any = cookie_dependency,
-            _authx_openapi_query: Any = query_dependency,
+            **extra: Any,
         ) -> TokenPayload:
             self._error_handler.ensure_request_exception_handlers(request)
             payload = await self._auth_required(
@@ -925,6 +964,12 @@ class AuthX(Generic[T]):
 
             return payload
 
+        # Inject signature so FastAPI discovers Depends only for active locations
+        sig_params = [
+            inspect.Parameter("request", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Request),
+            *openapi_params.values(),
+        ]
+        _scopes_required.__signature__ = inspect.Signature(sig_params)
         return _scopes_required
 
     async def get_current_subject(self, request: Request) -> Optional[T]:

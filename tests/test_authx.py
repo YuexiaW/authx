@@ -61,6 +61,25 @@ def test_create_refresh_token(authx: AuthX):
     assert payload.type == "refresh"
 
 
+@pytest.mark.asyncio
+async def test_async_create_access_token(authx: AuthX):
+    token = await authx.async_create_access_token(uid="async_user", fresh=True)
+    assert isinstance(token, str)
+    payload = authx._decode_token(token, verify=False)
+    assert payload.fresh
+    assert payload.sub == "async_user"
+    assert payload.type == "access"
+
+
+@pytest.mark.asyncio
+async def test_async_create_refresh_token(authx: AuthX):
+    token = await authx.async_create_refresh_token(uid="async_user")
+    assert isinstance(token, str)
+    payload = authx._decode_token(token, verify=False)
+    assert payload.sub == "async_user"
+    assert payload.type == "refresh"
+
+
 def test_verify_token(authx: AuthX):
     token = authx.create_access_token(uid="blablah", fresh=True)
     payload = authx._decode_token(token, verify=False)
