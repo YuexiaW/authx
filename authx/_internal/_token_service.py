@@ -83,10 +83,6 @@ class TokenService:
         scopes: Optional[list[str]] = None,
         **kwargs: Any,
     ) -> str:
-        encode_data = data.copy() if data is not None else {}
-        if self.login_type is not None:
-            encode_data["login_type"] = self.login_type
-
         payload = self.create_payload(
             uid=uid,
             type=type,
@@ -101,7 +97,7 @@ class TokenService:
             key=self.config.private_key,
             algorithm=self.config.JWT_ALGORITHM,
             headers=headers,
-            data=encode_data if encode_data else None,
+            data=data,
         )
 
     def decode_token(
