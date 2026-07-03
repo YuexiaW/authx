@@ -3,6 +3,9 @@
 import contextlib
 import inspect
 from collections.abc import Awaitable, Coroutine
+from functools import cached_property
+
+from makefun import with_signature
 from typing import (
     Any,
     Callable,
@@ -194,7 +197,7 @@ class AuthX(Generic[T]):
     def _create_payload(
         self,
         uid: str,
-        type: str,
+        token_type: str,
         fresh: bool = False,
         expiry: Optional[DateTimeExpression] = None,
         data: Optional[dict[str, Any]] = None,
@@ -204,7 +207,7 @@ class AuthX(Generic[T]):
     ) -> TokenPayload:
         return self._token_service.create_payload(
             uid=uid,
-            type=type,
+            token_type=token_type,
             fresh=fresh,
             expiry=expiry,
             data=data,
@@ -216,7 +219,7 @@ class AuthX(Generic[T]):
     def _create_token(
         self,
         uid: str,
-        type: str,
+        token_type: str,
         fresh: bool = False,
         headers: Optional[dict[str, Any]] = None,
         expiry: Optional[DateTimeExpression] = None,
@@ -227,7 +230,7 @@ class AuthX(Generic[T]):
     ) -> str:
         return self._token_service.create_token(
             uid=uid,
-            type=type,
+            token_type=token_type,
             fresh=fresh,
             headers=headers,
             expiry=expiry,
@@ -254,20 +257,20 @@ class AuthX(Generic[T]):
     def _set_cookies(
         self,
         token: str,
-        type: str,
+        token_type: str,
         response: Response,
         max_age: Optional[int] = None,
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        self._cookie_service.set_cookies(token=token, type=type, response=response, max_age=max_age)
+        self._cookie_service.set_cookies(token=token, token_type=token_type, response=response, max_age=max_age)
 
     def _unset_cookies(
         self,
-        type: str,
+        token_type: str,
         response: Response,
     ) -> None:
-        self._cookie_service.unset_cookies(type=type, response=response)
+        self._cookie_service.unset_cookies(token_type=token_type, response=response)
 
     @overload
     async def _get_token_from_request(
@@ -351,15 +354,15 @@ class AuthX(Generic[T]):
     async def _auth_required(
         self,
         request: Request,
-        type: str = "access",
+        token_type: str = "access",
         verify_type: bool = True,
         verify_fresh: bool = False,
         verify_csrf: Optional[bool] = None,
         locations: Optional[TokenLocations] = None,
     ) -> TokenPayload:
-        if type == "access":
+        if token_type == "access":
             method = self.get_access_token_from_request
-        elif type == "refresh":
+        elif token_type == "refresh":
             method = self.get_refresh_token_from_request
         else:
             ...  # pragma: no cover
@@ -448,7 +451,7 @@ class AuthX(Generic[T]):
         """
         return self._create_token(
             uid=uid,
-            type="access",
+            token_type="access",
             fresh=fresh,
             headers=headers,
             expiry=expiry,
@@ -504,7 +507,7 @@ class AuthX(Generic[T]):
         """
         return self._create_token(
             uid=uid,
-            type="refresh",
+            token_type="refresh",
             headers=headers,
             expiry=expiry,
             data=data,
@@ -653,22 +656,22 @@ class AuthX(Generic[T]):
 
     # --- Standard FastAPI dependency properties ---
 
-    @property
+    @cached_property
     def FRESH_REQUIRED(self) -> TokenPayload:
         """FastAPI Dependency to enforce valid token availability in request."""
         return Depends(self.fresh_token_required)
 
-    @property
+    @cached_property
     def ACCESS_REQUIRED(self) -> TokenPayload:
         """FastAPI Dependency to enforce presence of an `access` token in request."""
         return Depends(self.access_token_required)
 
-    @property
+    @cached_property
     def REFRESH_REQUIRED(self) -> TokenPayload:
         """FastAPI Dependency to enforce presence of a `refresh` token in request."""
         return Depends(self.refresh_token_required)
 
-    @property
+    @cached_property
     def ACCESS_TOKEN(self) -> RequestToken:
         """FastAPI Dependency to retrieve access token from request."""
 
@@ -677,7 +680,7 @@ class AuthX(Generic[T]):
 
         return Depends(_get_access_token)
 
-    @property
+    @cached_property
     def REFRESH_TOKEN(self) -> RequestToken:
         """FastAPI Dependency to retrieve refresh token from request."""
 
@@ -686,12 +689,12 @@ class AuthX(Generic[T]):
 
         return Depends(_get_refresh_token)
 
-    @property
+    @cached_property
     def CURRENT_SUBJECT(self) -> T:
         """FastAPI Dependency to retrieve the current subject from request."""
         return Depends(self.get_current_subject)
 
-    @property
+    @cached_property
     def WS_AUTH_REQUIRED(self) -> TokenPayload:
         """FastAPI Dependency to enforce valid access token on a WebSocket connection.
 
@@ -745,8 +748,8 @@ class AuthX(Generic[T]):
             auto_error=False,
         )
 
-    def _openapi_cookie_security_scheme(self, type: str) -> Callable[..., Any]:
-        if type == "refresh":
+    def _openapi_cookie_security_scheme(self, token_type: str) -> Callable[..., Any]:
+        if token_type == "refresh":
             return APIKeyCookie(
                 name=self.config.JWT_REFRESH_COOKIE_NAME,
                 scheme_name="AuthXRefreshCookie",
@@ -770,19 +773,19 @@ class AuthX(Generic[T]):
 
     def _openapi_security_dependencies(
         self,
-        type: str = "access",
+        token_type: str = "access",
         locations: Optional[TokenLocations] = None,
     ) -> tuple[Callable[..., Any], Callable[..., Any], Callable[..., Any]]:
         effective_locations = locations if locations is not None else self.config.JWT_TOKEN_LOCATION
         return (
             self._openapi_header_security_scheme() if "headers" in effective_locations else _noop_openapi_security,
-            self._openapi_cookie_security_scheme(type) if "cookies" in effective_locations else _noop_openapi_security,
+            self._openapi_cookie_security_scheme(token_type) if "cookies" in effective_locations else _noop_openapi_security,
             self._openapi_query_security_scheme() if "query" in effective_locations else _noop_openapi_security,
         )
 
     def _build_openapi_params(
         self,
-        type: str = "access",
+        token_type: str = "access",
         locations: Optional[TokenLocations] = None,
     ) -> dict[str, inspect.Parameter]:
         """Build OpenAPI signature params for enabled token locations only.
@@ -802,7 +805,7 @@ class AuthX(Generic[T]):
                 default=dep, annotation=Any,
             )
         if "cookies" in effective:
-            dep = Depends(self._openapi_cookie_security_scheme(type))
+            dep = Depends(self._openapi_cookie_security_scheme(token_type))
             result["_authx_openapi_cookie"] = inspect.Parameter(
                 "_authx_openapi_cookie", inspect.Parameter.KEYWORD_ONLY,
                 default=dep, annotation=Any,
@@ -817,7 +820,7 @@ class AuthX(Generic[T]):
 
     def token_required(
         self,
-        type: str = "access",
+        token_type: str = "access",
         verify_type: bool = True,
         verify_fresh: bool = False,
         verify_csrf: Optional[bool] = None,
@@ -826,7 +829,7 @@ class AuthX(Generic[T]):
         """Dependency to enforce valid token availability in request.
 
         Args:
-            type (str, optional): Require a given token type. Defaults to "access".
+            token_type (str, optional): Require a given token type. Defaults to "access".
             verify_type (bool, optional): Apply type verification. Defaults to True.
             verify_fresh (bool, optional): Require token freshness. Defaults to False.
             verify_csrf (Optional[bool], optional): Enable CSRF verification. Defaults to None.
@@ -835,8 +838,13 @@ class AuthX(Generic[T]):
         Returns:
             Callable[[Request], TokenPayload]: Dependency for Valid token Payload retrieval
         """
-        openapi_params = self._build_openapi_params(type=type, locations=locations)
+        openapi_params = self._build_openapi_params(token_type=token_type, locations=locations)
+        sig = inspect.Signature([
+            inspect.Parameter("request", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Request),
+            *openapi_params.values(),
+        ])
 
+        @with_signature(sig)
         async def _auth_required(
             request: Request,
             **extra: Any,
@@ -844,46 +852,40 @@ class AuthX(Generic[T]):
             self._error_handler.ensure_request_exception_handlers(request)
             return await self._auth_required(
                 request=request,
-                type=type,
+                token_type=token_type,
                 verify_csrf=verify_csrf,
                 verify_type=verify_type,
                 verify_fresh=verify_fresh,
                 locations=locations,
             )
 
-        # Inject signature so FastAPI discovers Depends only for active locations
-        sig_params = [
-            inspect.Parameter("request", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Request),
-            *openapi_params.values(),
-        ]
-        _auth_required.__signature__ = inspect.Signature(sig_params)
         return _auth_required
 
-    @property
+    @cached_property
     def fresh_token_required(self) -> Callable[[Request], Awaitable[TokenPayload]]:
         """FastAPI Dependency to enforce presence of a `fresh` `access` token in request."""
         return self.token_required(
-            type="access",
+            token_type="access",
             verify_csrf=None,
             verify_fresh=True,
             verify_type=True,
         )
 
-    @property
+    @cached_property
     def access_token_required(self) -> Callable[[Request], Awaitable[TokenPayload]]:
         """FastAPI Dependency to enforce presence of an `access` token in request."""
         return self.token_required(
-            type="access",
+            token_type="access",
             verify_csrf=None,
             verify_fresh=False,
             verify_type=True,
         )
 
-    @property
+    @cached_property
     def refresh_token_required(self) -> Callable[[Request], Awaitable[TokenPayload]]:
         """FastAPI Dependency to enforce presence of a `refresh` token in request."""
         return self.token_required(
-            type="refresh",
+            token_type="refresh",
             verify_csrf=None,
             verify_fresh=False,
             verify_type=True,
@@ -939,8 +941,13 @@ class AuthX(Generic[T]):
             ```
         """
         required_scopes = list(scopes)
-        openapi_params = self._build_openapi_params(type="access", locations=locations)
+        openapi_params = self._build_openapi_params(token_type="access", locations=locations)
+        sig = inspect.Signature([
+            inspect.Parameter("request", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Request),
+            *openapi_params.values(),
+        ])
 
+        @with_signature(sig)
         async def _scopes_required(
             request: Request,
             **extra: Any,
@@ -948,7 +955,7 @@ class AuthX(Generic[T]):
             self._error_handler.ensure_request_exception_handlers(request)
             payload = await self._auth_required(
                 request=request,
-                type="access",
+                token_type="access",
                 verify_type=verify_type,
                 verify_fresh=verify_fresh,
                 verify_csrf=verify_csrf,
@@ -964,12 +971,6 @@ class AuthX(Generic[T]):
 
             return payload
 
-        # Inject signature so FastAPI discovers Depends only for active locations
-        sig_params = [
-            inspect.Parameter("request", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Request),
-            *openapi_params.values(),
-        ]
-        _scopes_required.__signature__ = inspect.Signature(sig_params)
         return _scopes_required
 
     async def get_current_subject(self, request: Request) -> Optional[T]:
@@ -992,7 +993,7 @@ class AuthX(Generic[T]):
     async def get_token_from_request(
         self,
         request: Request,
-        type: TokenType = "access",
+        token_type: TokenType = "access",
         optional: Literal[True] = True,
         locations: Optional[TokenLocations] = None,
     ) -> Optional[RequestToken]: ...
@@ -1001,7 +1002,7 @@ class AuthX(Generic[T]):
     async def get_token_from_request(
         self,
         request: Request,
-        type: TokenType = "access",
+        token_type: TokenType = "access",
         optional: Literal[False] = False,
         locations: Optional[TokenLocations] = None,
     ) -> RequestToken: ...
@@ -1009,7 +1010,7 @@ class AuthX(Generic[T]):
     async def get_token_from_request(
         self,
         request: Request,
-        type: TokenType = "access",
+        token_type: TokenType = "access",
         optional: bool = True,
         locations: Optional[TokenLocations] = None,
     ) -> Optional[RequestToken]:
@@ -1017,7 +1018,7 @@ class AuthX(Generic[T]):
 
         Args:
             request (Request): The FastAPI request object.
-            type (TokenType, optional): The type of token to retrieve from request.
+            token_type (TokenType, optional): The type of token to retrieve from request.
                 Defaults to "access".
             optional (bool, optional): Whether or not to enforce token presence in request.
                 Defaults to True.
@@ -1036,7 +1037,7 @@ class AuthX(Generic[T]):
         Example:
             ```python
             token = await auth.get_token_from_request(request)
-            token = await auth.get_token_from_request(request, type="refresh")
+            token = await auth.get_token_from_request(request, token_type="refresh")
             token = await auth.get_token_from_request(request, optional=False)
             ```
         """
@@ -1044,14 +1045,14 @@ class AuthX(Generic[T]):
             return await self._get_token_from_request(
                 request,
                 locations=locations,
-                refresh=(type == "refresh"),
+                refresh=(token_type == "refresh"),
                 optional=True,
             )
         else:
             return await self._get_token_from_request(
                 request,
                 locations=locations,
-                refresh=(type == "refresh"),
+                refresh=(token_type == "refresh"),
                 optional=False,
             )
 

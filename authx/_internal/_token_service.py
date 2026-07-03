@@ -30,7 +30,7 @@ class TokenService:
     def create_payload(
         self,
         uid: str,
-        type: str,
+        token_type: str,
         fresh: bool = False,
         expiry: Optional[DateTimeExpression] = None,
         data: Optional[dict[str, Any]] = None,
@@ -48,7 +48,7 @@ class TokenService:
 
         exp = expiry
         if exp is None:
-            exp = self.config.JWT_ACCESS_TOKEN_EXPIRES if type == "access" else self.config.JWT_REFRESH_TOKEN_EXPIRES
+            exp = self.config.JWT_ACCESS_TOKEN_EXPIRES if token_type == "access" else self.config.JWT_REFRESH_TOKEN_EXPIRES
 
         csrf = ""
         if self.config.has_location("cookies") and self.config.JWT_COOKIE_CSRF_PROTECT:
@@ -62,7 +62,7 @@ class TokenService:
             sub=uid,
             fresh=fresh,
             exp=exp,
-            type=type,
+            type=token_type,
             iss=self.config.JWT_ENCODE_ISSUER,
             aud=aud,
             csrf=csrf,
@@ -74,7 +74,7 @@ class TokenService:
     def create_token(
         self,
         uid: str,
-        type: str,
+        token_type: str,
         fresh: bool = False,
         headers: Optional[dict[str, Any]] = None,
         expiry: Optional[DateTimeExpression] = None,
@@ -85,7 +85,7 @@ class TokenService:
     ) -> str:
         payload = self.create_payload(
             uid=uid,
-            type=type,
+            token_type=token_type,
             fresh=fresh,
             expiry=expiry,
             data=data,

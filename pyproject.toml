@@ -55,6 +55,7 @@ dependencies = [
     "pytz>=2023.3,<2027.0",
     "itsdangerous>=2.2.0,<3.0.0",
     "uvicorn>=0.39.0",
+    "makefun>=1.16.0",
 ]
 
 dynamic = ["version"]

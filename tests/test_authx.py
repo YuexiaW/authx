@@ -94,7 +94,7 @@ def test_set_wrong_token_type_cookie_exception(authx: AuthX):
     token = authx.create_access_token(uid="blablah", fresh=True)
 
     with pytest.raises(ValueError):
-        authx._set_cookies(token=token, type="bad_type", response=response)
+            authx._set_cookies(token=token, token_type="bad_type", response=response)
 
 
 def test_unset_wrong_token_type_cookie_exception(authx: AuthX):
@@ -103,7 +103,7 @@ def test_unset_wrong_token_type_cookie_exception(authx: AuthX):
     authx.set_access_cookies(token=token, response=response)
 
     with pytest.raises(ValueError):
-        authx._unset_cookies(type="bad_type", response=response)
+        authx._unset_cookies(token_type="bad_type", response=response)
 
 
 def test_set_access_cookies(authx: AuthX):
@@ -259,7 +259,7 @@ async def test__auth_required(authx: AuthX, refresh_token: str, access_token: st
             ],
         }
     )
-    access_payload: TokenPayload = await authx._auth_required(request=access_req, verify_fresh=True, type="access")
+    access_payload: TokenPayload = await authx._auth_required(request=access_req, verify_fresh=True, token_type="access")
     assert access_payload.type == "access"
 
     # Test refresh token required from headers
@@ -273,7 +273,7 @@ async def test__auth_required(authx: AuthX, refresh_token: str, access_token: st
             ],
         }
     )
-    refresh_payload: TokenPayload = await authx._auth_required(request=refresh_req, verify_fresh=False, type="refresh")
+    refresh_payload: TokenPayload = await authx._auth_required(request=refresh_req, verify_fresh=False, token_type="refresh")
     assert refresh_payload.type == "refresh"
 
 
@@ -294,7 +294,7 @@ async def test_token_required(authx: AuthX, access_token: str):
         }
     )
 
-    dependency = authx.token_required(verify_fresh=True, type="access")
+    dependency = authx.token_required(verify_fresh=True, token_type="access")
     access_token: TokenPayload = await dependency(request=req)
     assert access_token.type == "access"
 
@@ -348,7 +348,7 @@ def test_set_and_unset_cookies(authx, mock_response):
 
 
 def test_token_required_dependency(authx):
-    dependency = authx.token_required(type="access", verify_fresh=True)
+    dependency = authx.token_required(token_type="access", verify_fresh=True)
     assert callable(dependency)
 
 
@@ -387,7 +387,7 @@ async def test_get_token_from_request_direct_refresh(authx: AuthX, refresh_token
         }
     )
 
-    token = await authx.get_token_from_request(req, type="refresh")
+    token = await authx.get_token_from_request(req, token_type="refresh")
     assert token is not None
     assert token.token == refresh_token
     assert token.location == "headers"

@@ -129,6 +129,7 @@ dependencies = [
     { name = "fastapi", version = "0.128.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "fastapi", version = "0.138.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "itsdangerous" },
+    { name = "makefun" },
     { name = "pydantic" },
     { name = "pydantic-settings", version = "2.11.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "pydantic-settings", version = "2.14.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
@@ -286,6 +287,7 @@ test = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.111.0" },
     { name = "itsdangerous", specifier = ">=2.2.0,<3.0.0" },
+    { name = "makefun", specifier = ">=1.16.0" },
     { name = "pydantic", specifier = ">=2.10.5,<3.0.0" },
     { name = "pydantic-settings", specifier = ">=2.1.0" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.6.0,<3.0.0" },
@@ -2036,6 +2038,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/0d/11/ec3e390627f70477093909875a38843c826ee2ff554d1649645c7cc59248/librt-0.11.0-cp39-cp39-musllinux_1_2_x86_64.whl", hash = "sha256:7a80a71e1fda83cc752a9141e87aae7fef279538597564d670e9ce513f286192", size = 538049, upload-time = "2026-05-10T18:17:21.221Z" },
     { url = "https://files.pythonhosted.org/packages/cd/a7/649401dae7ea8645dd218aa2d9c351afa7b9e0645f07dc8776a1972c0cad/librt-0.11.0-cp39-cp39-win32.whl", hash = "sha256:140695816ddf3c86eb972981a26f35efd871c44b0c3aed44c8cd01749386617f", size = 100360, upload-time = "2026-05-10T18:17:22.537Z" },
     { url = "https://files.pythonhosted.org/packages/2a/7e/6a9711d78f338445e36992a90071962294f5bab388b554ef8a313e6412dd/librt-0.11.0-cp39-cp39-win_amd64.whl", hash = "sha256:92f7ff819c197fc30473190a12c2856f325ac90aabfccbeb2072d28cc2e234e3", size = 118407, upload-time = "2026-05-10T18:17:24.01Z" },
+]
+
+[[package]]
+name = "makefun"
+version = "1.16.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7b/cf/6780ab8bc3b84a1cce3e4400aed3d64b6db7d5e227a2f75b6ded5674701a/makefun-1.16.0.tar.gz", hash = "sha256:e14601831570bff1f6d7e68828bcd30d2f5856f24bad5de0ccb22921ceebc947", size = 73565, upload-time = "2025-05-09T15:00:42.313Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/c0/4bc973defd1270b89ccaae04cef0d5fa3ea85b59b108ad2c08aeea9afb76/makefun-1.16.0-py2.py3-none-any.whl", hash = "sha256:43baa4c3e7ae2b17de9ceac20b669e9a67ceeadff31581007cca20a07bbe42c4", size = 22923, upload-time = "2025-05-09T15:00:41.042Z" },
 ]
 
 [[package]]

@@ -178,7 +178,7 @@ class AuthManager(_ErrorHandler):
     def _build_openapi_params(
         self,
         login_type: str,
-        type: str = "access",
+        token_type: str = "access",
         locations: Optional[TokenLocations] = None,
     ) -> dict[str, inspect.Parameter]:
         """Build OpenAPI signature params for enabled token locations only.
@@ -188,7 +188,7 @@ class AuthManager(_ErrorHandler):
         hasn't been registered yet (``BadConfigurationError``).
         """
         try:
-            return self.get(login_type)._build_openapi_params(type=type, locations=locations)
+            return self.get(login_type)._build_openapi_params(token_type=token_type, locations=locations)
         except BadConfigurationError:
             dep = Depends(HTTPBearer(
                 scheme_name="AuthXBearer",
@@ -206,7 +206,7 @@ class AuthManager(_ErrorHandler):
     def token_required(
         self,
         login_type: str,
-        type: str = "access",
+        token_type: str = "access",
         verify_type: bool = True,
         verify_fresh: bool = False,
         verify_csrf: Optional[bool] = None,
@@ -215,7 +215,7 @@ class AuthManager(_ErrorHandler):
         """Dependency factory requiring a token for a specific login type."""
         openapi_params = self._build_openapi_params(
             login_type=login_type,
-            type=type,
+            token_type=token_type,
             locations=locations,
         )
 
@@ -227,7 +227,7 @@ class AuthManager(_ErrorHandler):
             return await self._auth_required(
                 login_type=login_type,
                 request=request,
-                type=type,
+                token_type=token_type,
                 verify_type=verify_type,
                 verify_fresh=verify_fresh,
                 verify_csrf=verify_csrf,
@@ -245,11 +245,11 @@ class AuthManager(_ErrorHandler):
     def _openapi_security_dependencies(
         self,
         login_type: str,
-        type: str = "access",
+        token_type: str = "access",
         locations: Optional[TokenLocations] = None,
     ) -> tuple[Callable[..., Any], Callable[..., Any], Callable[..., Any]]:
         try:
-            return self.get(login_type)._openapi_security_dependencies(type=type, locations=locations)
+            return self.get(login_type)._openapi_security_dependencies(token_type=token_type, locations=locations)
         except BadConfigurationError:
             return (
                 HTTPBearer(
@@ -264,21 +264,21 @@ class AuthManager(_ErrorHandler):
 
     def access_token_required(self, login_type: str) -> Callable[[Request], Awaitable[TokenPayload]]:
         """Dependency factory requiring an access token for a login type."""
-        return self.token_required(login_type=login_type, type="access")
+        return self.token_required(login_type=login_type, token_type="access")
 
     def refresh_token_required(self, login_type: str) -> Callable[[Request], Awaitable[TokenPayload]]:
         """Dependency factory requiring a refresh token for a login type."""
-        return self.token_required(login_type=login_type, type="refresh")
+        return self.token_required(login_type=login_type, token_type="refresh")
 
     def fresh_token_required(self, login_type: str) -> Callable[[Request], Awaitable[TokenPayload]]:
         """Dependency factory requiring a fresh access token for a login type."""
-        return self.token_required(login_type=login_type, type="access", verify_fresh=True)
+        return self.token_required(login_type=login_type, token_type="access", verify_fresh=True)
 
     async def _auth_required(
         self,
         login_type: str,
         request: Request,
-        type: str = "access",
+        token_type: str = "access",
         verify_type: bool = True,
         verify_fresh: bool = False,
         verify_csrf: Optional[bool] = None,
@@ -288,7 +288,7 @@ class AuthManager(_ErrorHandler):
         try:
             payload = await auth._auth_required(
                 request=request,
-                type=type,
+                token_type=token_type,
                 verify_type=verify_type,
                 verify_fresh=verify_fresh,
                 verify_csrf=verify_csrf,
@@ -298,7 +298,7 @@ class AuthManager(_ErrorHandler):
             mismatch = await self._decode_mismatched_login_type(
                 expected_login_type=login_type,
                 request=request,
-                type=type,
+                token_type=token_type,
                 locations=locations,
             )
             if mismatch is not None:
@@ -314,13 +314,13 @@ class AuthManager(_ErrorHandler):
         self,
         expected_login_type: str,
         request: Request,
-        type: str,
+        token_type: str,
         locations: Optional[TokenLocations],
     ) -> Optional[str]:
         expected_auth = self.get(expected_login_type)
         request_token = await expected_auth.get_token_from_request(
             request=request,
-            type="refresh" if type == "refresh" else "access",
+            token_type="refresh" if token_type == "refresh" else "access",
             optional=False,
             locations=locations,
         )

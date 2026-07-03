@@ -38,10 +38,10 @@ class CookieService:
     def config(self) -> AuthXConfig:
         return self._config
 
-    def _get_cookie_meta(self, type: str) -> dict[str, str]:
-        if type not in _COOKIE_KEYS:
+    def _get_cookie_meta(self, token_type: str) -> dict[str, str]:
+        if token_type not in _COOKIE_KEYS:
             raise ValueError("Token type must be 'access' | 'refresh'")
-        mapping = _COOKIE_KEYS[type]
+        mapping = _COOKIE_KEYS[token_type]
         return {
             "token_key": getattr(self.config, mapping["token_key"]),
             "token_path": getattr(self.config, mapping["token_path"]),
@@ -52,11 +52,11 @@ class CookieService:
     def set_cookies(
         self,
         token: str,
-        type: str,
+        token_type: str,
         response: Response,
         max_age: Optional[int] = None,
     ) -> None:
-        meta = self._get_cookie_meta(type)
+        meta = self._get_cookie_meta(token_type)
 
         response.set_cookie(
             key=meta["token_key"],
@@ -85,10 +85,10 @@ class CookieService:
 
     def unset_cookies(
         self,
-        type: str,
+        token_type: str,
         response: Response,
     ) -> None:
-        meta = self._get_cookie_meta(type)
+        meta = self._get_cookie_meta(token_type)
 
         response.delete_cookie(
             key=meta["token_key"],
@@ -109,7 +109,7 @@ class CookieService:
         response: Response,
         max_age: Optional[int] = None,
     ) -> None:
-        self.set_cookies(token=token, type="access", response=response, max_age=max_age)
+        self.set_cookies(token=token, token_type="access", response=response, max_age=max_age)
 
     def set_refresh_cookies(
         self,
@@ -117,7 +117,7 @@ class CookieService:
         response: Response,
         max_age: Optional[int] = None,
     ) -> None:
-        self.set_cookies(token=token, type="refresh", response=response, max_age=max_age)
+        self.set_cookies(token=token, token_type="refresh", response=response, max_age=max_age)
 
     def unset_access_cookies(self, response: Response) -> None:
         self.unset_cookies("access", response=response)

@@ -93,25 +93,25 @@ def create_securities(security: AuthX) -> SecuritiesTuple:
         refresh_token_headers=Depends(
             security.token_required(
                 locations=["headers"],
-                type="refresh",
+                token_type="refresh",
             )
         ),
         refresh_token_json=Depends(
             security.token_required(
                 locations=["json"],
-                type="refresh",
+                token_type="refresh",
             )
         ),
         refresh_token_query=Depends(
             security.token_required(
                 locations=["query"],
-                type="refresh",
+                token_type="refresh",
             )
         ),
         refresh_token_cookies=Depends(
             security.token_required(
                 locations=["cookies"],
-                type="refresh",
+                token_type="refresh",
             )
         ),
     )
@@ -124,7 +124,7 @@ def create_get_token_routes(app: FastAPI, security: AuthX) -> None:
         return await security.get_token_from_request(request)
 
     async def _get_refresh_token(request: Request) -> Optional[RequestToken]:
-        return await security.get_token_from_request(request, type="refresh")
+        return await security.get_token_from_request(request, token_type="refresh")
 
     @app.post("/read/access")
     def _access_token_route(
