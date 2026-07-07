@@ -1,15 +1,17 @@
 """AuthManager for multiple isolated AuthX contexts."""
 
+import contextlib
 import inspect
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence
 from typing import Any, Optional
 
-from fastapi import Depends, Request
+from fastapi import Depends, Request, Response
 from fastapi.security import HTTPBearer
 
 from authx._internal._error import _ErrorHandler
 from authx.config import AuthXConfig
 from authx.exceptions import (
+    AuthXException,
     BadConfigurationError,
     JWTDecodeError,
     LoginTypeMismatchError,
@@ -581,3 +583,60 @@ class AuthManager(_ErrorHandler):
             verify_csrf=verify_csrf,
             locations=locations,
         )
+
+    async def implicit_refresh_middleware(
+        self,
+        request: Request,
+        call_next: Callable[[Request], Coroutine[Any, Any, Response]],
+    ) -> Response:
+        """FastAPI Middleware that applies implicit token refresh for the authenticated login type.
+
+        After the endpoint runs, reads ``request.state.login_type`` (set by
+        :meth:`AuthX._auth_required` during token verification) and performs
+        an implicit refresh only for the :class:`AuthX` instance that handled
+        the request — no iteration over unrelated login types.
+
+        Usage::
+
+            manager = AuthManager()
+            manager.get_or_create("admin")
+            manager.get_or_create("user")
+
+            app.middleware("http")(manager.implicit_refresh_middleware)
+
+        The middleware is a no-op when no token was verified on the request
+        (public endpoints, missing tokens, etc.).
+
+        Returns:
+            Response: Response with an updated access token cookie if the
+                      token was nearing expiry.
+        """
+        response = await call_next(request)
+
+        login_type: Optional[str] = getattr(request.state, "login_type", None)
+        if login_type is None:
+            return response
+
+        try:
+            auth = self.get(login_type)
+        except BadConfigurationError:
+            return response
+
+        config = auth.config
+        if not config.has_location("cookies") or not auth._implicit_refresh_enabled_for_request(request):
+            return response
+
+        with contextlib.suppress(AuthXException):
+            token = await auth._get_token_from_request(
+                request=request,
+                locations=["cookies"],
+                refresh=False,
+                optional=False,
+            )
+            payload = auth.verify_token(token, verify_fresh=False, verify_csrf=False)
+            if payload.time_until_expiry < config.JWT_IMPLICIT_REFRESH_DELTATIME:
+                new_token = await auth.async_create_access_token(
+                    uid=payload.sub, fresh=False, data=payload.extra_dict,
+                )
+                auth.set_access_cookies(new_token, response=response)
+        return response

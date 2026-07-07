@@ -391,12 +391,20 @@ class AuthX(Generic[T]):
         if await self._callbacks.is_token_in_blocklist(request_token.token):
             raise RevokedTokenError("Token has been revoked", login_type=self.login_type)
 
-        return self.verify_token(
+        payload = self.verify_token(
             request_token,
             verify_type=verify_type,
             verify_fresh=verify_fresh,
             verify_csrf=verify_csrf,
         )
+
+        # Expose the authenticated login_type on request.state so that
+        # downstream middleware, dependencies, and route handlers can
+        # read it without re-parsing the token.
+        if payload.login_type is not None:
+            request.state.login_type = payload.login_type
+
+        return payload
 
     def verify_token(
         self,
