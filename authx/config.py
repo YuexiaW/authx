@@ -83,6 +83,12 @@ class AuthXConfig(BaseSettings):
     JWT_JSON_KEY: str = "access_token"
     JWT_REFRESH_JSON_KEY: str = "refresh_token"
 
+    # Auto-isolation
+    AUTO_ISOLATE_BY_LOGIN_TYPE: bool = False
+
+    # Permission caching
+    JWT_PERMISSIONS_IN_TOKEN: bool = False
+
     # Session Tracking Options
     JWT_SESSION_TRACKING: bool = False
     JWT_SESSION_UPDATE_LAST_ACTIVE: bool = True

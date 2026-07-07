@@ -105,6 +105,16 @@ class AuthX(Generic[T]):
         self._error_handler = _ErrorHandler()
         self._config = config
         self.login_type = login_type
+
+        # Auto-isolate token names by login_type when configured
+        if config.AUTO_ISOLATE_BY_LOGIN_TYPE and login_type:
+            config.JWT_HEADER_NAME = f"x-auth-{login_type}"
+            config.JWT_ACCESS_COOKIE_NAME = f"{login_type}_access_token"
+            config.JWT_REFRESH_COOKIE_NAME = f"{login_type}_refresh_token"
+            config.JWT_ACCESS_CSRF_COOKIE_NAME = f"{login_type}_csrf_access"
+            config.JWT_REFRESH_CSRF_COOKIE_NAME = f"{login_type}_csrf_refresh"
+            config.JWT_QUERY_STRING_NAME = f"{login_type}_token"
+
         self._token_service = TokenService(config=self._config, login_type=self.login_type)
         self._cookie_service = CookieService(config=self._config, token_service=self._token_service)
         self._session_service = SessionService()
@@ -476,11 +486,26 @@ class AuthX(Generic[T]):
     ) -> str:
         """Async variant of :meth:`create_access_token`.
 
-        Currently delegates to the sync implementation. This async surface
-        exists so that subclasses or future versions can perform async work
-        (e.g. database queries for custom claims) without breaking callers
-        that already ``await`` the method.
+        When :attr:`AuthXConfig.JWT_PERMISSIONS_IN_TOKEN` is ``True`` and a
+        :class:`PermissionProvider` has been set, this method fetches the
+        latest permissions and roles for the user from the provider and
+        embeds them in the token payload — so that downstream
+        ``permissions_required`` and ``role_required`` dependencies can read
+        them directly from the JWT without calling the provider on every
+        request.
+
+        The returned token is functionally identical to
+        :meth:`create_access_token`; callers that do not need the
+        auto-embedding behaviour can continue to call the sync version.
         """
+        if self._config.JWT_PERMISSIONS_IN_TOKEN and self._permission_handler is not None:
+            perms = await self._permission_handler.get_permissions(uid=uid, login_type=self.login_type)
+            roles = await self._permission_handler.get_roles(uid=uid, login_type=self.login_type)
+            data = dict(data) if data is not None else {}
+            if perms:
+                data["permissions"] = perms
+            if roles:
+                data["roles"] = roles
         return self.create_access_token(uid, fresh, headers, expiry, data, audience, scopes, *args, **kwargs)
 
     def create_refresh_token(
@@ -530,11 +555,20 @@ class AuthX(Generic[T]):
     ) -> str:
         """Async variant of :meth:`create_refresh_token`.
 
-        Currently delegates to the sync implementation. This async surface
-        exists so that subclasses or future versions can perform async work
-        (e.g. database queries for custom claims) without breaking callers
-        that already ``await`` the method.
+        When :attr:`AuthXConfig.JWT_PERMISSIONS_IN_TOKEN` is ``True`` and a
+        :class:`PermissionProvider` has been set, this method re-fetches the
+        latest permissions and roles from the provider and embeds them in
+        the new token — ensuring refreshed tokens carry up-to-date
+        authorisation data.
         """
+        if self._config.JWT_PERMISSIONS_IN_TOKEN and self._permission_handler is not None:
+            perms = await self._permission_handler.get_permissions(uid=uid, login_type=self.login_type)
+            roles = await self._permission_handler.get_roles(uid=uid, login_type=self.login_type)
+            data = dict(data) if data is not None else {}
+            if perms:
+                data["permissions"] = perms
+            if roles:
+                data["roles"] = roles
         return self.create_refresh_token(uid, headers, expiry, data, audience, scopes, *args, **kwargs)
 
     def create_token_pair(
@@ -1046,12 +1080,6 @@ class AuthX(Generic[T]):
             **extra: Any,
         ) -> TokenPayload:
             self._error_handler.ensure_request_exception_handlers(request)
-            handler = self._permission_handler
-            if handler is None:
-                raise RuntimeError(
-                    "No PermissionProvider configured. "
-                    "Call auth.set_permission_provider(provider) first."
-                )
 
             payload = await self._auth_required(
                 request=request,
@@ -1062,10 +1090,21 @@ class AuthX(Generic[T]):
                 locations=locations,
             )
 
-            user_permissions = await handler.get_permissions(
-                uid=payload.sub,
-                login_type=self.login_type,
-            )
+            if self._config.JWT_PERMISSIONS_IN_TOKEN:
+                # Read permissions embedded in the JWT payload at token creation time.
+                # Tokens that pre-date this feature simply lack the claim → empty list.
+                user_permissions = getattr(payload, "permissions", None) or []
+            else:
+                handler = self._permission_handler
+                if handler is None:
+                    raise RuntimeError(
+                        "No PermissionProvider configured. "
+                        "Call auth.set_permission_provider(provider) first."
+                    )
+                user_permissions = await handler.get_permissions(
+                    uid=payload.sub,
+                    login_type=self.login_type,
+                )
 
             if not has_required_scopes(required_permissions, user_permissions, all_required=all_required):
                 raise InsufficientScopeError(
@@ -1124,12 +1163,6 @@ class AuthX(Generic[T]):
             **extra: Any,
         ) -> TokenPayload:
             self._error_handler.ensure_request_exception_handlers(request)
-            handler = self._permission_handler
-            if handler is None:
-                raise RuntimeError(
-                    "No PermissionProvider configured. "
-                    "Call auth.set_permission_provider(provider) first."
-                )
 
             payload = await self._auth_required(
                 request=request,
@@ -1140,10 +1173,20 @@ class AuthX(Generic[T]):
                 locations=locations,
             )
 
-            user_roles = await handler.get_roles(
-                uid=payload.sub,
-                login_type=self.login_type,
-            )
+            if self._config.JWT_PERMISSIONS_IN_TOKEN:
+                # Read roles embedded in the JWT payload at token creation time.
+                user_roles = getattr(payload, "roles", None) or []
+            else:
+                handler = self._permission_handler
+                if handler is None:
+                    raise RuntimeError(
+                        "No PermissionProvider configured. "
+                        "Call auth.set_permission_provider(provider) first."
+                    )
+                user_roles = await handler.get_roles(
+                    uid=payload.sub,
+                    login_type=self.login_type,
+                )
 
             if not has_required_scopes(required_roles, user_roles, all_required=all_required):
                 raise InsufficientScopeError(
@@ -1299,7 +1342,9 @@ class AuthX(Generic[T]):
                 )
                 payload = self.verify_token(token, verify_fresh=False, verify_csrf=False)
                 if payload.time_until_expiry < self.config.JWT_IMPLICIT_REFRESH_DELTATIME:
-                    new_token = self.create_access_token(uid=payload.sub, fresh=False, data=payload.extra_dict)
+                    new_token = await self.async_create_access_token(
+                        uid=payload.sub, fresh=False, data=payload.extra_dict,
+                    )
                     self.set_access_cookies(new_token, response=response)
         return response
 
