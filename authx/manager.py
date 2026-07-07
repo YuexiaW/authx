@@ -8,6 +8,7 @@ from fastapi import Depends, Request
 from fastapi.security import HTTPBearer
 
 from authx._internal._error import _ErrorHandler
+from authx.config import AuthXConfig
 from authx.exceptions import (
     BadConfigurationError,
     JWTDecodeError,
@@ -65,6 +66,39 @@ class AuthManager(_ErrorHandler):
             return self._auth_by_type[login_type]
         except KeyError as e:
             raise BadConfigurationError(f"Unknown login_type '{login_type}'") from e
+
+    def get_or_create(
+        self,
+        login_type: str,
+        config: Optional[AuthXConfig] = None,
+        **auth_kwargs: Any,
+    ) -> AuthX[Any]:
+        """Get or create an AuthX instance for the given login_type.
+
+        Lazily creates a new AuthX (with an optional custom config) if one
+        hasn't been registered yet — similar to SaManager.getStpLogic(type, isCreate=true).
+
+        Args:
+            login_type: The login type identifier.
+            config: Optional config to use when creating a new instance.
+                    Defaults to ``AuthXConfig()`` when omitted.
+            **auth_kwargs: Additional keyword arguments forwarded to the
+                           :class:`AuthX` constructor (e.g. ``model``,
+                           ``model_callback``, ``token_callback``).
+
+        Returns:
+            The existing or newly created :class:`AuthX` instance.
+        """
+        try:
+            return self.get(login_type)
+        except BadConfigurationError:
+            auth = AuthX(
+                config=config or AuthXConfig(),
+                login_type=login_type,
+                **auth_kwargs,
+            )
+            self.register(auth)
+            return auth
 
     def add_policy_rule(self, rule: PolicyRule) -> None:
         """Register a policy rule."""

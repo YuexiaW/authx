@@ -354,3 +354,97 @@ def test_manager_scopes_required_or_logic():
     token = manager.create_access_token("admin", uid="root", scopes=["admin:read"])
     resp = client.get("/scope-or", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
+
+
+# ------------------------------------------------------------------
+# get_or_create
+# ------------------------------------------------------------------
+
+
+def test_get_or_create_creates_on_first_call():
+    manager = AuthManager()
+    auth = manager.get_or_create("admin", config=AuthXConfig(JWT_SECRET_KEY="secret"))
+    assert auth.login_type == "admin"
+    assert manager.get("admin") is auth
+
+
+def test_get_or_create_returns_existing_on_second_call():
+    manager = AuthManager()
+    auth1 = manager.get_or_create("admin", config=AuthXConfig(JWT_SECRET_KEY="secret"))
+    auth2 = manager.get_or_create("admin", config=AuthXConfig(JWT_SECRET_KEY="other"))
+    assert auth1 is auth2
+    # The original config is preserved — second call did NOT replace it
+    token = auth1.create_access_token("root")
+    payload = auth1._decode_token(token)
+    assert payload.sub == "root"
+
+
+def test_get_or_create_default_config():
+    manager = AuthManager()
+    auth = manager.get_or_create("user", config=AuthXConfig(JWT_SECRET_KEY="secret"))
+    assert auth.login_type == "user"
+    token = auth.create_access_token("alice")
+    payload = auth._decode_token(token)
+    assert payload.sub == "alice"
+    assert payload.login_type == "user"
+
+
+def test_get_or_create_passes_auth_kwargs():
+    manager = AuthManager()
+    auth = manager.get_or_create("admin", model=int)
+    assert auth.model is int
+
+
+# ------------------------------------------------------------------
+# AUTO_ISOLATE_BY_LOGIN_TYPE
+# ------------------------------------------------------------------
+
+
+def test_auto_isolate_renames_header():
+    config = AuthXConfig(JWT_SECRET_KEY="secret", AUTO_ISOLATE_BY_LOGIN_TYPE=True)
+    auth = AuthX(config=config, login_type="admin")
+    assert auth._config.JWT_HEADER_NAME == "x-auth-admin"
+    token = auth.create_access_token("root")
+    payload = auth._decode_token(token)
+    assert payload.sub == "root"
+
+
+def test_auto_isolate_renames_cookies():
+    config = AuthXConfig(JWT_SECRET_KEY="secret", AUTO_ISOLATE_BY_LOGIN_TYPE=True)
+    auth = AuthX(config=config, login_type="admin")
+    assert auth._config.JWT_ACCESS_COOKIE_NAME == "admin_access_token"
+    assert auth._config.JWT_REFRESH_COOKIE_NAME == "admin_refresh_token"
+
+
+def test_auto_isolate_renames_csrf_and_query():
+    config = AuthXConfig(JWT_SECRET_KEY="secret", AUTO_ISOLATE_BY_LOGIN_TYPE=True)
+    auth = AuthX(config=config, login_type="admin")
+    assert auth._config.JWT_ACCESS_CSRF_COOKIE_NAME == "admin_csrf_access"
+    assert auth._config.JWT_REFRESH_CSRF_COOKIE_NAME == "admin_csrf_refresh"
+    assert auth._config.JWT_QUERY_STRING_NAME == "admin_token"
+
+
+def test_auto_isolate_noop_when_flag_off():
+    config = AuthXConfig(JWT_SECRET_KEY="secret", AUTO_ISOLATE_BY_LOGIN_TYPE=False)
+    auth = AuthX(config=config, login_type="admin")
+    assert auth._config.JWT_HEADER_NAME == "Authorization"
+    assert auth._config.JWT_ACCESS_COOKIE_NAME == "access_token_cookie"
+
+
+def test_auto_isolate_noop_when_login_type_none():
+    config = AuthXConfig(JWT_SECRET_KEY="secret", AUTO_ISOLATE_BY_LOGIN_TYPE=True)
+    auth = AuthX(config=config)
+    assert auth._config.JWT_HEADER_NAME == "Authorization"
+
+
+def test_auto_isolate_with_manager_get_or_create():
+    manager = AuthManager()
+    auth = manager.get_or_create(
+        "admin",
+        config=AuthXConfig(JWT_SECRET_KEY="secret", AUTO_ISOLATE_BY_LOGIN_TYPE=True),
+    )
+    assert auth._config.JWT_HEADER_NAME == "x-auth-admin"
+    assert auth._config.JWT_ACCESS_COOKIE_NAME == "admin_access_token"
+    token = auth.create_access_token("root")
+    payload = auth._decode_token(token)
+    assert payload.sub == "root"
