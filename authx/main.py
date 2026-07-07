@@ -35,6 +35,7 @@ from authx.exceptions import (
     MissingTokenError,
     RevokedTokenError,
 )
+from authx.permission import PermissionProvider, _PermissionProviderHandler
 from authx.schema import RequestToken, TokenPayload, TokenResponse
 from authx.types import (
     DateTimeExpression,
@@ -107,6 +108,7 @@ class AuthX(Generic[T]):
         self._token_service = TokenService(config=self._config, login_type=self.login_type)
         self._cookie_service = CookieService(config=self._config, token_service=self._token_service)
         self._session_service = SessionService()
+        self._permission_handler: Optional[_PermissionProviderHandler] = None
 
     def __setattr__(self, name: str, value: Any) -> None:
         # Forward MSG_* attribute sets to _error_handler for backward
@@ -972,6 +974,187 @@ class AuthX(Generic[T]):
             return payload
 
         return _scopes_required
+
+    # ------------------------------------------------------------------
+    # Permission Provider
+    # ------------------------------------------------------------------
+
+    def set_permission_provider(
+        self,
+        provider: PermissionProvider,
+    ) -> None:
+        """Attach a runtime permission/role provider to this AuthX instance.
+
+        Once attached, the :meth:`permissions_required` and
+        :meth:`role_required` dependencies query the provider on every
+        request so that permission changes take effect immediately
+        without re-issuing tokens.
+
+        Args:
+            provider: An object implementing the :class:`PermissionProvider`
+                protocol (i.e. with ``get_permissions(uid, login_type)``
+                and ``get_roles(uid, login_type)`` async methods).
+        """
+        self._permission_handler = _PermissionProviderHandler(provider)
+
+    def permissions_required(
+        self,
+        *permissions: str,
+        all_required: bool = True,
+        verify_type: bool = True,
+        verify_fresh: bool = False,
+        verify_csrf: Optional[bool] = None,
+        locations: Optional[TokenLocations] = None,
+    ) -> Callable[[Request], Awaitable[TokenPayload]]:
+        """Dependency that checks runtime permissions via the
+        :class:`PermissionProvider`.
+
+        Unlike :meth:`scopes_required` which validates scopes **embedded
+        in the JWT token at creation time**, this dependency queries the
+        configured :class:`PermissionProvider` on **every request** so
+        that permission changes take effect immediately.
+
+        A provider **must** have been set via
+        :meth:`set_permission_provider` before this dependency can be
+        used.
+
+        Args:
+            *permissions: Required permission strings.
+            all_required: If True (default), ALL permissions must be
+                present (AND).  If False, at least ONE is enough (OR).
+            verify_type: Apply token type verification.  Defaults to True.
+            verify_fresh: Require token freshness.  Defaults to False.
+            verify_csrf: CSRF verification override.  Defaults to None.
+            locations: Token locations.  Defaults to None.
+
+        Returns:
+            A FastAPI dependency callable.
+
+        Raises:
+            RuntimeError: If no :class:`PermissionProvider` has been set.
+        """
+        required_permissions = list(permissions)
+        openapi_params = self._build_openapi_params(token_type="access", locations=locations)
+        sig = inspect.Signature([
+            inspect.Parameter("request", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Request),
+            *openapi_params.values(),
+        ])
+
+        @with_signature(sig)
+        async def _permissions_required(
+            request: Request,
+            **extra: Any,
+        ) -> TokenPayload:
+            self._error_handler.ensure_request_exception_handlers(request)
+            handler = self._permission_handler
+            if handler is None:
+                raise RuntimeError(
+                    "No PermissionProvider configured. "
+                    "Call auth.set_permission_provider(provider) first."
+                )
+
+            payload = await self._auth_required(
+                request=request,
+                token_type="access",
+                verify_type=verify_type,
+                verify_fresh=verify_fresh,
+                verify_csrf=verify_csrf,
+                locations=locations,
+            )
+
+            user_permissions = await handler.get_permissions(
+                uid=payload.sub,
+                login_type=self.login_type,
+            )
+
+            if not has_required_scopes(required_permissions, user_permissions, all_required=all_required):
+                raise InsufficientScopeError(
+                    required=required_permissions,
+                    provided=user_permissions,
+                    login_type=self.login_type,
+                )
+
+            return payload
+
+        return _permissions_required
+
+    def role_required(
+        self,
+        *roles: str,
+        all_required: bool = True,
+        verify_type: bool = True,
+        verify_fresh: bool = False,
+        verify_csrf: Optional[bool] = None,
+        locations: Optional[TokenLocations] = None,
+    ) -> Callable[[Request], Awaitable[TokenPayload]]:
+        """Dependency that checks runtime roles via the
+        :class:`PermissionProvider`.
+
+        Similar to :meth:`permissions_required` but for role checks.
+
+        A provider **must** have been set via
+        :meth:`set_permission_provider` before this dependency can be
+        used.
+
+        Args:
+            *roles: Required role strings.
+            all_required: If True (default), ALL roles must be present
+                (AND).  If False, at least ONE is enough (OR).
+            verify_type: Apply token type verification.  Defaults to True.
+            verify_fresh: Require token freshness.  Defaults to False.
+            verify_csrf: CSRF verification override.  Defaults to None.
+            locations: Token locations.  Defaults to None.
+
+        Returns:
+            A FastAPI dependency callable.
+
+        Raises:
+            RuntimeError: If no :class:`PermissionProvider` has been set.
+        """
+        required_roles = list(roles)
+        openapi_params = self._build_openapi_params(token_type="access", locations=locations)
+        sig = inspect.Signature([
+            inspect.Parameter("request", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Request),
+            *openapi_params.values(),
+        ])
+
+        @with_signature(sig)
+        async def _role_required(
+            request: Request,
+            **extra: Any,
+        ) -> TokenPayload:
+            self._error_handler.ensure_request_exception_handlers(request)
+            handler = self._permission_handler
+            if handler is None:
+                raise RuntimeError(
+                    "No PermissionProvider configured. "
+                    "Call auth.set_permission_provider(provider) first."
+                )
+
+            payload = await self._auth_required(
+                request=request,
+                token_type="access",
+                verify_type=verify_type,
+                verify_fresh=verify_fresh,
+                verify_csrf=verify_csrf,
+                locations=locations,
+            )
+
+            user_roles = await handler.get_roles(
+                uid=payload.sub,
+                login_type=self.login_type,
+            )
+
+            if not has_required_scopes(required_roles, user_roles, all_required=all_required):
+                raise InsufficientScopeError(
+                    required=required_roles,
+                    provided=user_roles,
+                    login_type=self.login_type,
+                )
+
+            return payload
+
+        return _role_required
 
     async def get_current_subject(self, request: Request) -> Optional[T]:
         """Retrieve the currently authenticated subject from the request.

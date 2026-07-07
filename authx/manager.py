@@ -16,6 +16,7 @@ from authx.exceptions import (
     RevokedTokenError,
 )
 from authx.main import _OPENAPI_BEARER_DESCRIPTION, AuthX, _noop_openapi_security
+from authx.permission import PermissionProvider
 from authx.policy import (
     PolicyContext,
     PolicyEngine,
@@ -274,6 +275,48 @@ class AuthManager(_ErrorHandler):
         """Dependency factory requiring a fresh access token for a login type."""
         return self.token_required(login_type=login_type, token_type="access", verify_fresh=True)
 
+    def scopes_required(
+        self,
+        login_type: str,
+        *scopes: str,
+        all_required: bool = True,
+        verify_type: bool = True,
+        verify_fresh: bool = False,
+        verify_csrf: Optional[bool] = None,
+        locations: Optional[TokenLocations] = None,
+    ) -> Callable[[Request], Awaitable[TokenPayload]]:
+        """Dependency factory that checks token scopes for a login type.
+
+        Delegates to the registered :class:`AuthX` instance's
+        :meth:`~AuthX.scopes_required`.
+
+        Unlike :meth:`permissions_required` which queries the runtime
+        :class:`PermissionProvider`, this validates scopes **embedded in the
+        JWT token** at creation time.
+
+        Args:
+            login_type: The registered login type to authenticate against.
+            *scopes: Variable number of scope strings required.
+            all_required: If True (default), ALL scopes must be present (AND logic).
+                         If False, at least ONE scope must be present (OR logic).
+            verify_type: Apply token type verification. Defaults to True.
+            verify_fresh: Require token freshness. Defaults to False.
+            verify_csrf: Enable CSRF verification. Defaults to None (uses config).
+            locations: Locations to retrieve token from. Defaults to None.
+
+        Returns:
+            A FastAPI dependency callable.
+        """
+        auth = self.get(login_type)
+        return auth.scopes_required(
+            *scopes,
+            all_required=all_required,
+            verify_type=verify_type,
+            verify_fresh=verify_fresh,
+            verify_csrf=verify_csrf,
+            locations=locations,
+        )
+
     async def _auth_required(
         self,
         login_type: str,
@@ -424,3 +467,83 @@ class AuthManager(_ErrorHandler):
         ]
         _policy_required.__signature__ = inspect.Signature(sig_params)
         return _policy_required
+
+    # ------------------------------------------------------------------
+    # Permission Provider (delegates to registered AuthX instances)
+    # ------------------------------------------------------------------
+
+    def set_permission_provider(
+        self,
+        provider: PermissionProvider,
+        login_type: Optional[str] = None,
+    ) -> None:
+        """Attach a runtime permission/role provider to one or all AuthX instances.
+
+        Args:
+            provider: An object implementing the :class:`PermissionProvider` protocol.
+            login_type: If provided, set the provider only on the AuthX instance
+                for that login type.  If ``None``, set it on **all** registered
+                AuthX instances that do not already have a provider.
+        """
+        if login_type is not None:
+            self.get(login_type).set_permission_provider(provider)
+        else:
+            for auth in self._auth_by_type.values():
+                if auth._permission_handler is None:
+                    auth.set_permission_provider(provider)
+
+    def permissions_required(
+        self,
+        login_type: str,
+        *permissions: str,
+        all_required: bool = True,
+        verify_type: bool = True,
+        verify_fresh: bool = False,
+        verify_csrf: Optional[bool] = None,
+        locations: Optional[TokenLocations] = None,
+    ) -> Callable[[Request], Awaitable[TokenPayload]]:
+        """Dependency factory that checks runtime permissions for a login type.
+
+        Delegates to the registered :class:`AuthX` instance's
+        :meth:`~AuthX.permissions_required`.
+
+        A provider **must** have been set on the underlying AuthX instance
+        (via :meth:`set_permission_provider`) before this dependency can be used.
+        """
+        auth = self.get(login_type)
+        return auth.permissions_required(
+            *permissions,
+            all_required=all_required,
+            verify_type=verify_type,
+            verify_fresh=verify_fresh,
+            verify_csrf=verify_csrf,
+            locations=locations,
+        )
+
+    def role_required(
+        self,
+        login_type: str,
+        *roles: str,
+        all_required: bool = True,
+        verify_type: bool = True,
+        verify_fresh: bool = False,
+        verify_csrf: Optional[bool] = None,
+        locations: Optional[TokenLocations] = None,
+    ) -> Callable[[Request], Awaitable[TokenPayload]]:
+        """Dependency factory that checks runtime roles for a login type.
+
+        Delegates to the registered :class:`AuthX` instance's
+        :meth:`~AuthX.role_required`.
+
+        A provider **must** have been set on the underlying AuthX instance
+        (via :meth:`set_permission_provider`) before this dependency can be used.
+        """
+        auth = self.get(login_type)
+        return auth.role_required(
+            *roles,
+            all_required=all_required,
+            verify_type=verify_type,
+            verify_fresh=verify_fresh,
+            verify_csrf=verify_csrf,
+            locations=locations,
+        )

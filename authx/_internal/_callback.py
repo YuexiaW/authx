@@ -1,12 +1,6 @@
-import sys
 from inspect import iscoroutinefunction
-
-if sys.version_info >= (3, 10):  # pragma: no cover
-    from typing import ParamSpecKwargs
-else:
-    from typing_extensions import ParamSpecKwargs  # pragma: no cover
-
 from typing import Generic, Optional, cast
+from typing_extensions import ParamSpecKwargs
 
 from authx.types import ModelCallback, T, TokenCallback
 

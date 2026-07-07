@@ -263,3 +263,94 @@ def test_add_policy_rule_and_evaluator_delegate_to_policy_engine():
     manager.add_policy_evaluator(evaluator)
 
     assert manager.policy_engine.rules == [rule]
+
+
+# ---------------------------------------------------------------------------
+# scopes_required delegation
+# ---------------------------------------------------------------------------
+
+
+def test_manager_scopes_required_allows_matching_scope():
+    """AuthManager.scopes_required delegates and allows matching token scope."""
+    manager = AuthManager()
+    auth = make_auth("admin", "admin-secret")
+    manager.register(auth)
+    app = FastAPI()
+    manager.handle_errors(app)
+
+    @app.get(
+        "/scope-protected",
+        dependencies=[Depends(manager.scopes_required("admin", "admin:read"))],
+    )
+    def scope_protected():
+        return {"ok": True}
+
+    client = TestClient(app)
+    token = manager.create_access_token("admin", uid="root", scopes=["admin:read"])
+    resp = client.get("/scope-protected", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+
+
+def test_manager_scopes_required_denies_missing_scope():
+    """AuthManager.scopes_required rejects token without required scope."""
+    manager = AuthManager()
+    auth = make_auth("admin", "admin-secret")
+    manager.register(auth)
+    app = FastAPI()
+    manager.handle_errors(app)
+
+    @app.get(
+        "/scope-protected",
+        dependencies=[Depends(manager.scopes_required("admin", "admin:write"))],
+    )
+    def scope_protected():
+        return {"ok": True}
+
+    client = TestClient(app)
+    token = manager.create_access_token("admin", uid="root", scopes=["admin:read"])
+    resp = client.get("/scope-protected", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 403
+
+
+def test_manager_scopes_required_wildcard():
+    """AuthManager.scopes_required: token with wildcard satisfies specific requirement."""
+    manager = AuthManager()
+    auth = make_auth("admin", "admin-secret")
+    manager.register(auth)
+    app = FastAPI()
+    manager.handle_errors(app)
+
+    @app.get(
+        "/scope-wildcard",
+        dependencies=[Depends(manager.scopes_required("admin", "admin:read"))],
+    )
+    def scope_wildcard():
+        return {"ok": True}
+
+    client = TestClient(app)
+    # Token has "admin:*" wildcard → satisfies "admin:read" requirement
+    token = manager.create_access_token("admin", uid="root", scopes=["admin:*"])
+    resp = client.get("/scope-wildcard", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+
+
+def test_manager_scopes_required_or_logic():
+    """AuthManager.scopes_required with all_required=False (OR logic)."""
+    manager = AuthManager()
+    auth = make_auth("admin", "admin-secret")
+    manager.register(auth)
+    app = FastAPI()
+    manager.handle_errors(app)
+
+    @app.get(
+        "/scope-or",
+        dependencies=[Depends(manager.scopes_required("admin", "admin:read", "admin:write", all_required=False))],
+    )
+    def scope_or():
+        return {"ok": True}
+
+    client = TestClient(app)
+    # Token has "admin:read" → OR logic → should pass
+    token = manager.create_access_token("admin", uid="root", scopes=["admin:read"])
+    resp = client.get("/scope-or", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200

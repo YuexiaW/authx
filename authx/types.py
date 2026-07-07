@@ -1,14 +1,8 @@
 """This is a type hinting file for the authx package."""
 
 import datetime
-import sys
 from collections.abc import Awaitable, Sequence
 from typing import Any, Literal, Optional, Protocol, TypeVar, Union
-
-if sys.version_info >= (3, 10):  # pragma: no cover
-    pass  # pragma: no cover
-else:
-    pass  # pragma: no cover
 
 
 T = TypeVar("T")

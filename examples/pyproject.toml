@@ -7,7 +7,7 @@ name = "examples"
 description = "Examples of using AuthX"
 readme = "README.md"
 authors = [{ name = "Yasser Tahiri", email = "hello@yezz.me" }]
-requires-python = ">=3.9,<3.13"
+requires-python = ">=3.10,<3.13"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",

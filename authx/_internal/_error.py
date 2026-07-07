@@ -173,6 +173,15 @@ class _ErrorHandler:
             status_code=401,
             message=None,
         )
+        # TokenExpiredError must be registered before JWTDecodeError (its parent)
+        # so Starlette's MRO-based lookup picks the 401 handler instead of the
+        # generic 422 handler for JWTDecodeError.
+        self._set_request_exception_handler(
+            request,
+            exception=exceptions.TokenExpiredError,
+            status_code=401,
+            message=None,
+        )
         self._set_request_exception_handler(request, exception=exceptions.JWTDecodeError, status_code=422, message=None)
         self._set_request_exception_handler(
             request,
@@ -254,6 +263,10 @@ class _ErrorHandler:
         Args:
             app (FastAPI): the FastAPI application to handle errors for
         """
+        # TokenExpiredError must be registered before JWTDecodeError (its parent)
+        # so Starlette's MRO-based lookup picks the 401 handler instead of the
+        # generic 422 handler for JWTDecodeError.
+        self._set_app_exception_handler(app, exception=exceptions.TokenExpiredError, status_code=401, message=None)
         self._set_app_exception_handler(app, exception=exceptions.JWTDecodeError, status_code=422, message=None)
         self._set_app_exception_handler(
             app,

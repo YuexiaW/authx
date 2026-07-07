@@ -19,6 +19,7 @@ from authx.exceptions import (
 )
 from authx.main import AuthX
 from authx.manager import AuthManager
+from authx.permission import PermissionProvider, StaticPermissionProvider
 from authx.policy import (
     PolicyCondition,
     PolicyContext,
@@ -52,4 +53,6 @@ __all__ = (
     "RateLimiter",
     "RateLimitExceeded",
     "SessionInfo",
+    "PermissionProvider",
+    "StaticPermissionProvider",
 )
