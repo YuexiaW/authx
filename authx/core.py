@@ -15,10 +15,10 @@ async def _get_token_from_headers(
     request: Request, config: AuthXConfig, refresh: bool = False, **kwargs: Any
 ) -> RequestToken:
     """Get access token from headers."""
-    # Get Header
-    auth_header: Optional[str] = request.headers.get(config.JWT_HEADER_NAME)
+    header_name = kwargs.get("token_name") or config.JWT_HEADER_NAME
+    auth_header: Optional[str] = request.headers.get(header_name)
     if auth_header is None:
-        raise MissingTokenError(f"Missing '{config.JWT_HEADER_TYPE}' in '{config.JWT_HEADER_NAME}' header.")
+        raise MissingTokenError(f"Missing '{config.JWT_HEADER_TYPE}' in '{header_name}' header.")
 
     if config.JWT_HEADER_TYPE:
         token = auth_header.replace(f"{config.JWT_HEADER_TYPE} ", "")
@@ -50,11 +50,12 @@ async def _get_token_from_cookies(
     Returns:
         RequestToken: RequestToken instance
     """
-    cookie_key = config.JWT_ACCESS_COOKIE_NAME
+    cookie_key = kwargs.get("token_name") or config.JWT_ACCESS_COOKIE_NAME
+    if refresh and "token_name" not in kwargs:
+        cookie_key = config.JWT_REFRESH_COOKIE_NAME
     csrf_header_key = config.JWT_ACCESS_CSRF_HEADER_NAME
     csrf_field_key = config.JWT_ACCESS_CSRF_FIELD_NAME
     if refresh:
-        cookie_key = config.JWT_REFRESH_COOKIE_NAME
         csrf_header_key = config.JWT_REFRESH_CSRF_HEADER_NAME
         csrf_field_key = config.JWT_REFRESH_CSRF_FIELD_NAME
 
@@ -95,9 +96,10 @@ async def _get_token_from_cookies(
 async def _get_token_from_query(
     request: Request, config: AuthXConfig, refresh: bool = False, **kwargs: Any
 ) -> RequestToken:
-    query_token = request.query_params.get(config.JWT_QUERY_STRING_NAME)
+    query_name = kwargs.get("token_name") or config.JWT_QUERY_STRING_NAME
+    query_token = request.query_params.get(query_name)
     if query_token is None:
-        raise MissingTokenError(f"Missing '{config.JWT_QUERY_STRING_NAME}' in query parameters")
+        raise MissingTokenError(f"Missing '{query_name}' in query parameters")
 
     return RequestToken(token=query_token, location="query")
 
@@ -108,11 +110,13 @@ async def _get_token_from_json(
     if request.headers.get("content-type") != "application/json":
         raise MissingTokenError("Invalid content-type. Must be application/json")
 
-    key = config.JWT_JSON_KEY
+    token_name_override = kwargs.get("token_name")
+    key = token_name_override or config.JWT_JSON_KEY
     token_type: Literal["access", "refresh"] = "access"
     if refresh:
         token_type = "refresh"
-        key = config.JWT_REFRESH_JSON_KEY
+        if token_name_override is None:
+            key = config.JWT_REFRESH_JSON_KEY
 
     try:
         json_data: dict[str, Any] = await request.json()

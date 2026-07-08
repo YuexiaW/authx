@@ -248,6 +248,7 @@ class AuthManager(_ErrorHandler):
         verify_fresh: bool = False,
         verify_csrf: Optional[bool] = None,
         locations: Optional[TokenLocations] = None,
+        token_name: Optional[str] = None,
     ) -> Callable[[Request], Awaitable[TokenPayload]]:
         """Dependency factory requiring a token for a specific login type."""
         openapi_params = self._build_openapi_params(
@@ -269,6 +270,7 @@ class AuthManager(_ErrorHandler):
                 verify_fresh=verify_fresh,
                 verify_csrf=verify_csrf,
                 locations=locations,
+                token_name=token_name,
             )
 
         # Inject signature so FastAPI discovers Depends only for active locations
@@ -305,6 +307,7 @@ class AuthManager(_ErrorHandler):
         verify_fresh: bool = False,
         verify_csrf: Optional[bool] = None,
         locations: Optional[TokenLocations] = None,
+        token_name: Optional[str] = None,
     ) -> Callable[[Request], Awaitable[TokenPayload]]:
         """Dependency factory requiring an access token for a login type.
 
@@ -315,6 +318,7 @@ class AuthManager(_ErrorHandler):
             locations: Token locations to search (e.g. ``["headers"]``,
                        ``["cookies"]``, ``["query"]``, ``["json"]``).
                        Defaults to the AuthX instance's configured locations.
+            token_name: Override the token key name for the active location.
         """
         return self.token_required(
             login_type=login_type,
@@ -323,6 +327,7 @@ class AuthManager(_ErrorHandler):
             verify_fresh=verify_fresh,
             verify_csrf=verify_csrf,
             locations=locations,
+            token_name=token_name,
         )
 
     def refresh_token_required(
@@ -330,6 +335,7 @@ class AuthManager(_ErrorHandler):
         login_type: str,
         verify_csrf: Optional[bool] = None,
         locations: Optional[TokenLocations] = None,
+        token_name: Optional[str] = None,
     ) -> Callable[[Request], Awaitable[TokenPayload]]:
         """Dependency factory requiring a refresh token for a login type.
 
@@ -343,6 +349,7 @@ class AuthManager(_ErrorHandler):
             locations: Token locations to search (e.g. ``["headers"]``,
                        ``["cookies"]``, ``["query"]``, ``["json"]``).
                        Defaults to the AuthX instance's configured locations.
+            token_name: Override the token key name for the active location.
         """
         return self.token_required(
             login_type=login_type,
@@ -350,6 +357,7 @@ class AuthManager(_ErrorHandler):
             verify_type=True,
             verify_csrf=verify_csrf,
             locations=locations,
+            token_name=token_name,
         )
 
     def fresh_token_required(
@@ -358,6 +366,7 @@ class AuthManager(_ErrorHandler):
         verify_fresh: bool = True,
         verify_csrf: Optional[bool] = None,
         locations: Optional[TokenLocations] = None,
+        token_name: Optional[str] = None,
     ) -> Callable[[Request], Awaitable[TokenPayload]]:
         """Dependency factory requiring a fresh access token for a login type.
 
@@ -368,6 +377,7 @@ class AuthManager(_ErrorHandler):
             locations: Token locations to search (e.g. ``["headers"]``,
                        ``["cookies"]``, ``["query"]``, ``["json"]``).
                        Defaults to the AuthX instance's configured locations.
+            token_name: Override the token key name for the active location.
         """
         return self.token_required(
             login_type=login_type,
@@ -376,6 +386,7 @@ class AuthManager(_ErrorHandler):
             verify_fresh=verify_fresh,
             verify_csrf=verify_csrf,
             locations=locations,
+            token_name=token_name,
         )
 
     def scopes_required(
@@ -429,6 +440,7 @@ class AuthManager(_ErrorHandler):
         verify_fresh: bool = False,
         verify_csrf: Optional[bool] = None,
         locations: Optional[TokenLocations] = None,
+        token_name: Optional[str] = None,
     ) -> TokenPayload:
         auth = self.get(login_type)
         try:
@@ -439,6 +451,7 @@ class AuthManager(_ErrorHandler):
                 verify_fresh=verify_fresh,
                 verify_csrf=verify_csrf,
                 locations=locations,
+                token_name=token_name,
             )
         except JWTDecodeError:
             mismatch = await self._decode_mismatched_login_type(
@@ -446,6 +459,7 @@ class AuthManager(_ErrorHandler):
                 request=request,
                 token_type=token_type,
                 locations=locations,
+                token_name=token_name,
             )
             if mismatch is not None:
                 raise LoginTypeMismatchError(
@@ -462,6 +476,7 @@ class AuthManager(_ErrorHandler):
         request: Request,
         token_type: str,
         locations: Optional[TokenLocations],
+        token_name: Optional[str] = None,
     ) -> Optional[str]:
         expected_auth = self.get(expected_login_type)
         request_token = await expected_auth.get_token_from_request(
@@ -469,6 +484,7 @@ class AuthManager(_ErrorHandler):
             token_type="refresh" if token_type == "refresh" else "access",
             optional=False,
             locations=locations,
+            token_name=token_name,
         )
         for registered_type, auth in self._auth_by_type.items():
             if registered_type == expected_login_type:

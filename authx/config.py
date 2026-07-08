@@ -83,9 +83,6 @@ class AuthXConfig(BaseSettings):
     JWT_JSON_KEY: str = "access_token"
     JWT_REFRESH_JSON_KEY: str = "refresh_token"
 
-    # Auto-isolation
-    AUTO_ISOLATE_BY_LOGIN_TYPE: bool = False
-
     # Permission caching
     JWT_PERMISSIONS_IN_TOKEN: bool = False
 

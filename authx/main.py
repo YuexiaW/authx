@@ -107,15 +107,6 @@ class AuthX(Generic[T]):
         self._config = config
         self.login_type = login_type
 
-        # Auto-isolate token names by login_type when configured
-        if config.AUTO_ISOLATE_BY_LOGIN_TYPE and login_type:
-            config.JWT_HEADER_NAME = f"x-auth-{login_type}"
-            config.JWT_ACCESS_COOKIE_NAME = f"{login_type}_access_token"
-            config.JWT_REFRESH_COOKIE_NAME = f"{login_type}_refresh_token"
-            config.JWT_ACCESS_CSRF_COOKIE_NAME = f"{login_type}_csrf_access"
-            config.JWT_REFRESH_CSRF_COOKIE_NAME = f"{login_type}_csrf_refresh"
-            config.JWT_QUERY_STRING_NAME = f"{login_type}_token"
-
         self._token_service = TokenService(config=self._config, login_type=self.login_type)
         self._cookie_service = CookieService(config=self._config, token_service=self._token_service)
         self._session_service = SessionService()
@@ -292,6 +283,7 @@ class AuthX(Generic[T]):
         locations: Optional[TokenLocations] = None,
         refresh: bool = False,
         optional: Literal[False] = False,
+        token_name: Optional[str] = None,
     ) -> RequestToken: ...
 
     @overload
@@ -301,6 +293,7 @@ class AuthX(Generic[T]):
         locations: Optional[TokenLocations] = None,
         refresh: bool = False,
         optional: Literal[True] = True,
+        token_name: Optional[str] = None,
     ) -> Optional[RequestToken]: ...
 
     async def _get_token_from_request(
@@ -309,6 +302,7 @@ class AuthX(Generic[T]):
         locations: Optional[TokenLocations] = None,
         refresh: bool = False,
         optional: bool = False,
+        token_name: Optional[str] = None,
     ) -> Optional[RequestToken]:
         if locations is None:
             locations = list(self.config.JWT_TOKEN_LOCATION)
@@ -317,7 +311,8 @@ class AuthX(Generic[T]):
             for location in locations:
                 try:
                     getter = TOKEN_GETTERS[location]
-                    token = await getter(request, self.config, refresh)
+                    kwargs = {"token_name": token_name} if token_name is not None else {}
+                    token = await getter(request, self.config, refresh, **kwargs)
                     if token is not None:
                         return token
                 except MissingTokenError as e:
@@ -331,13 +326,15 @@ class AuthX(Generic[T]):
             raise
 
     async def get_access_token_from_request(
-        self, request: Request, locations: Optional[TokenLocations] = None
+        self, request: Request, locations: Optional[TokenLocations] = None, token_name: Optional[str] = None
     ) -> RequestToken:
         """Dependency to retrieve access token from request.
 
         Args:
             request (Request): Request to retrieve access token from
             locations (Optional[TokenLocations], optional): Locations to retrieve token from. Defaults to None.
+            token_name (Optional[str], optional): Override the token key name for the
+                active location (e.g. a custom header or cookie name).
 
         Raises:
             MissingTokenError: When no `access` token is available in request
@@ -345,16 +342,18 @@ class AuthX(Generic[T]):
         Returns:
             RequestToken: Request Token instance for `access` token type
         """
-        return await self._get_token_from_request(request, optional=False, locations=locations)
+        return await self._get_token_from_request(request, optional=False, locations=locations, token_name=token_name)
 
     async def get_refresh_token_from_request(
-        self, request: Request, locations: Optional[TokenLocations] = None
+        self, request: Request, locations: Optional[TokenLocations] = None, token_name: Optional[str] = None
     ) -> RequestToken:
         """Dependency to retrieve refresh token from request.
 
         Args:
             request (Request): Request to retrieve refresh token from
             locations (Optional[TokenLocations], optional): Locations to retrieve token from. Defaults to None.
+            token_name (Optional[str], optional): Override the token key name for the
+                active location (e.g. a custom header or cookie name).
 
         Raises:
             MissingTokenError: When no `refresh` token is available in request
@@ -362,7 +361,7 @@ class AuthX(Generic[T]):
         Returns:
             RequestToken: Request Token instance for `refresh` token type
         """
-        return await self._get_token_from_request(request, refresh=True, optional=False, locations=locations)
+        return await self._get_token_from_request(request, refresh=True, optional=False, locations=locations, token_name=token_name)
 
     async def _auth_required(
         self,
@@ -372,6 +371,7 @@ class AuthX(Generic[T]):
         verify_fresh: bool = False,
         verify_csrf: Optional[bool] = None,
         locations: Optional[TokenLocations] = None,
+        token_name: Optional[str] = None,
     ) -> TokenPayload:
         if token_type == "access":
             method = self.get_access_token_from_request
@@ -387,6 +387,7 @@ class AuthX(Generic[T]):
         request_token = await method(
             request=request,
             locations=locations,
+            token_name=token_name,
         )
 
         if await self._callbacks.is_token_in_blocklist(request_token.token):
@@ -878,6 +879,7 @@ class AuthX(Generic[T]):
         verify_fresh: bool = False,
         verify_csrf: Optional[bool] = None,
         locations: Optional[TokenLocations] = None,
+        token_name: Optional[str] = None,
     ) -> Callable[[Request], Awaitable[TokenPayload]]:
         """Dependency to enforce valid token availability in request.
 
@@ -887,6 +889,8 @@ class AuthX(Generic[T]):
             verify_fresh (bool, optional): Require token freshness. Defaults to False.
             verify_csrf (Optional[bool], optional): Enable CSRF verification. Defaults to None.
             locations (Optional[TokenLocations], optional): Locations to retrieve token from. Defaults to None.
+            token_name (Optional[str], optional): Override the token key name for the
+                active location (e.g. a custom header or cookie name).
 
         Returns:
             Callable[[Request], TokenPayload]: Dependency for Valid token Payload retrieval
@@ -910,6 +914,7 @@ class AuthX(Generic[T]):
                 verify_type=verify_type,
                 verify_fresh=verify_fresh,
                 locations=locations,
+                token_name=token_name,
             )
 
         return _auth_required
@@ -919,6 +924,7 @@ class AuthX(Generic[T]):
         verify_fresh: bool = True,
         verify_csrf: Optional[bool] = None,
         locations: Optional[TokenLocations] = None,
+        token_name: Optional[str] = None,
     ) -> Callable[[Request], Awaitable[TokenPayload]]:
         """FastAPI Dependency to enforce presence of a `fresh` `access` token in request.
 
@@ -928,6 +934,7 @@ class AuthX(Generic[T]):
             locations: Token locations to search (e.g. ``["headers"]``,
                        ``["cookies"]``, ``["query"]``, ``["json"]``).
                        Defaults to the configured locations.
+            token_name: Override the token key name for the active location.
         """
         return self.token_required(
             token_type="access",
@@ -935,6 +942,7 @@ class AuthX(Generic[T]):
             verify_fresh=verify_fresh,
             verify_csrf=verify_csrf,
             locations=locations,
+            token_name=token_name,
         )
 
     def access_token_required(
@@ -942,6 +950,7 @@ class AuthX(Generic[T]):
         verify_fresh: bool = False,
         verify_csrf: Optional[bool] = None,
         locations: Optional[TokenLocations] = None,
+        token_name: Optional[str] = None,
     ) -> Callable[[Request], Awaitable[TokenPayload]]:
         """FastAPI Dependency to enforce presence of an `access` token in request.
 
@@ -951,6 +960,7 @@ class AuthX(Generic[T]):
             locations: Token locations to search (e.g. ``["headers"]``,
                        ``["cookies"]``, ``["query"]``, ``["json"]``).
                        Defaults to the configured locations.
+            token_name: Override the token key name for the active location.
         """
         return self.token_required(
             token_type="access",
@@ -958,12 +968,14 @@ class AuthX(Generic[T]):
             verify_fresh=verify_fresh,
             verify_csrf=verify_csrf,
             locations=locations,
+            token_name=token_name,
         )
 
     def refresh_token_required(
         self,
         verify_csrf: Optional[bool] = None,
         locations: Optional[TokenLocations] = None,
+        token_name: Optional[str] = None,
     ) -> Callable[[Request], Awaitable[TokenPayload]]:
         """FastAPI Dependency to enforce presence of a `refresh` token in request.
 
@@ -976,12 +988,14 @@ class AuthX(Generic[T]):
             locations: Token locations to search (e.g. ``["headers"]``,
                        ``["cookies"]``, ``["query"]``, ``["json"]``).
                        Defaults to the configured locations.
+            token_name: Override the token key name for the active location.
         """
         return self.token_required(
             token_type="refresh",
             verify_type=True,
             verify_csrf=verify_csrf,
             locations=locations,
+            token_name=token_name,
         )
 
     def scopes_required(
@@ -1279,6 +1293,7 @@ class AuthX(Generic[T]):
         token_type: TokenType = "access",
         optional: Literal[True] = True,
         locations: Optional[TokenLocations] = None,
+        token_name: Optional[str] = None,
     ) -> Optional[RequestToken]: ...
 
     @overload
@@ -1288,6 +1303,7 @@ class AuthX(Generic[T]):
         token_type: TokenType = "access",
         optional: Literal[False] = False,
         locations: Optional[TokenLocations] = None,
+        token_name: Optional[str] = None,
     ) -> RequestToken: ...
 
     async def get_token_from_request(
@@ -1296,6 +1312,7 @@ class AuthX(Generic[T]):
         token_type: TokenType = "access",
         optional: bool = True,
         locations: Optional[TokenLocations] = None,
+        token_name: Optional[str] = None,
     ) -> Optional[RequestToken]:
         """Retrieve token from request.
 
@@ -1307,6 +1324,8 @@ class AuthX(Generic[T]):
                 Defaults to True.
             locations (Optional[TokenLocations], optional): Locations to retrieve token from.
                 Defaults to None (uses configured JWT_TOKEN_LOCATION).
+            token_name (Optional[str], optional): Override the token key name for the
+                active location (e.g. a custom header or cookie name).
 
         Note:
             When `optional=True`, the return value might be `None`
@@ -1330,6 +1349,7 @@ class AuthX(Generic[T]):
                 locations=locations,
                 refresh=(token_type == "refresh"),
                 optional=True,
+                token_name=token_name,
             )
         else:
             return await self._get_token_from_request(
@@ -1337,6 +1357,7 @@ class AuthX(Generic[T]):
                 locations=locations,
                 refresh=(token_type == "refresh"),
                 optional=False,
+                token_name=token_name,
             )
 
     def _implicit_refresh_enabled_for_request(self, request: Request) -> bool:
