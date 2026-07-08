@@ -25,16 +25,10 @@ class BadConfigurationError(AuthXException):
 
 
 class JWTDecodeError(AuthXException):
-    """Exception raised when decoding JSON Web Token fails."""
-
-    pass
-
-
-class TokenExpiredError(JWTDecodeError):
-    """Exception raised when a JSON Web Token has expired.
+    """Exception raised when decoding JSON Web Token fails.
 
     Attributes:
-        token_type: The type of the expired token (``"access"`` or ``"refresh"``),
+        token_type: The type of the token (``"access"`` or ``"refresh"``),
             or ``None`` if it could not be determined.
     """
 
@@ -46,6 +40,10 @@ class TokenExpiredError(JWTDecodeError):
     ) -> None:
         self.token_type = token_type
         super().__init__(*args, **kwargs)
+
+
+class TokenExpiredError(JWTDecodeError):
+    """Exception raised when a JSON Web Token has expired."""
 
 
 class TokenInvalidSignatureError(JWTDecodeError):

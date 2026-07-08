@@ -32,9 +32,9 @@ from authx.core import TOKEN_GETTERS
 from authx.exceptions import (
     AuthXException,
     InsufficientScopeError,
+    JWTDecodeError,
     MissingTokenError,
     RevokedTokenError,
-    TokenExpiredError,
 )
 from authx.permission import PermissionProvider, _PermissionProviderHandler
 from authx.schema import RequestToken, TokenPayload, TokenResponse
@@ -399,10 +399,11 @@ class AuthX(Generic[T]):
                 verify_fresh=verify_fresh,
                 verify_csrf=verify_csrf,
             )
-        except TokenExpiredError as exc:
+        except JWTDecodeError as exc:
             # Annotate the exception with the expected token type so that
             # downstream exception handlers can distinguish an expired
-            # access token from an expired refresh token.
+            # access token from an expired refresh token (or any other
+            # decode error).
             exc.token_type = token_type
             raise
 
