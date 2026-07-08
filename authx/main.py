@@ -34,6 +34,7 @@ from authx.exceptions import (
     InsufficientScopeError,
     MissingTokenError,
     RevokedTokenError,
+    TokenExpiredError,
 )
 from authx.permission import PermissionProvider, _PermissionProviderHandler
 from authx.schema import RequestToken, TokenPayload, TokenResponse
@@ -391,12 +392,19 @@ class AuthX(Generic[T]):
         if await self._callbacks.is_token_in_blocklist(request_token.token):
             raise RevokedTokenError("Token has been revoked", login_type=self.login_type)
 
-        payload = self.verify_token(
-            request_token,
-            verify_type=verify_type,
-            verify_fresh=verify_fresh,
-            verify_csrf=verify_csrf,
-        )
+        try:
+            payload = self.verify_token(
+                request_token,
+                verify_type=verify_type,
+                verify_fresh=verify_fresh,
+                verify_csrf=verify_csrf,
+            )
+        except TokenExpiredError as exc:
+            # Annotate the exception with the expected token type so that
+            # downstream exception handlers can distinguish an expired
+            # access token from an expired refresh token.
+            exc.token_type = token_type
+            raise
 
         # Expose the authenticated login_type on request.state so that
         # downstream middleware, dependencies, and route handlers can
