@@ -302,7 +302,6 @@ class AuthManager(_ErrorHandler):
     def access_token_required(
         self,
         login_type: str,
-        verify_type: bool = True,
         verify_fresh: bool = False,
         verify_csrf: Optional[bool] = None,
         locations: Optional[TokenLocations] = None,
@@ -311,7 +310,6 @@ class AuthManager(_ErrorHandler):
 
         Args:
             login_type: The registered login type to authenticate against.
-            verify_type: Apply token type verification. Defaults to True.
             verify_fresh: Require token freshness. Defaults to False.
             verify_csrf: Apply CSRF verification. Defaults to the config value.
             locations: Token locations to search (e.g. ``["headers"]``,
@@ -321,7 +319,7 @@ class AuthManager(_ErrorHandler):
         return self.token_required(
             login_type=login_type,
             token_type="access",
-            verify_type=verify_type,
+            verify_type=True,
             verify_fresh=verify_fresh,
             verify_csrf=verify_csrf,
             locations=locations,
@@ -330,7 +328,6 @@ class AuthManager(_ErrorHandler):
     def refresh_token_required(
         self,
         login_type: str,
-        verify_type: bool = True,
         verify_csrf: Optional[bool] = None,
         locations: Optional[TokenLocations] = None,
     ) -> Callable[[Request], Awaitable[TokenPayload]]:
@@ -342,7 +339,6 @@ class AuthManager(_ErrorHandler):
 
         Args:
             login_type: The registered login type to authenticate against.
-            verify_type: Apply token type verification. Defaults to True.
             verify_csrf: Apply CSRF verification. Defaults to the config value.
             locations: Token locations to search (e.g. ``["headers"]``,
                        ``["cookies"]``, ``["query"]``, ``["json"]``).
@@ -351,7 +347,7 @@ class AuthManager(_ErrorHandler):
         return self.token_required(
             login_type=login_type,
             token_type="refresh",
-            verify_type=verify_type,
+            verify_type=True,
             verify_csrf=verify_csrf,
             locations=locations,
         )
@@ -359,7 +355,6 @@ class AuthManager(_ErrorHandler):
     def fresh_token_required(
         self,
         login_type: str,
-        verify_type: bool = True,
         verify_fresh: bool = True,
         verify_csrf: Optional[bool] = None,
         locations: Optional[TokenLocations] = None,
@@ -368,7 +363,6 @@ class AuthManager(_ErrorHandler):
 
         Args:
             login_type: The registered login type to authenticate against.
-            verify_type: Apply token type verification. Defaults to True.
             verify_fresh: Require token freshness. Defaults to True.
             verify_csrf: Apply CSRF verification. Defaults to the config value.
             locations: Token locations to search (e.g. ``["headers"]``,
@@ -378,7 +372,7 @@ class AuthManager(_ErrorHandler):
         return self.token_required(
             login_type=login_type,
             token_type="access",
-            verify_type=verify_type,
+            verify_type=True,
             verify_fresh=verify_fresh,
             verify_csrf=verify_csrf,
             locations=locations,

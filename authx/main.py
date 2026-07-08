@@ -916,7 +916,6 @@ class AuthX(Generic[T]):
 
     def fresh_token_required(
         self,
-        verify_type: bool = True,
         verify_fresh: bool = True,
         verify_csrf: Optional[bool] = None,
         locations: Optional[TokenLocations] = None,
@@ -924,7 +923,6 @@ class AuthX(Generic[T]):
         """FastAPI Dependency to enforce presence of a `fresh` `access` token in request.
 
         Args:
-            verify_type: Apply token type verification. Defaults to True.
             verify_fresh: Require token freshness. Defaults to True.
             verify_csrf: Apply CSRF verification. Defaults to the config value.
             locations: Token locations to search (e.g. ``["headers"]``,
@@ -933,7 +931,7 @@ class AuthX(Generic[T]):
         """
         return self.token_required(
             token_type="access",
-            verify_type=verify_type,
+            verify_type=True,
             verify_fresh=verify_fresh,
             verify_csrf=verify_csrf,
             locations=locations,
@@ -941,7 +939,6 @@ class AuthX(Generic[T]):
 
     def access_token_required(
         self,
-        verify_type: bool = True,
         verify_fresh: bool = False,
         verify_csrf: Optional[bool] = None,
         locations: Optional[TokenLocations] = None,
@@ -949,7 +946,6 @@ class AuthX(Generic[T]):
         """FastAPI Dependency to enforce presence of an `access` token in request.
 
         Args:
-            verify_type: Apply token type verification. Defaults to True.
             verify_fresh: Require token freshness. Defaults to False.
             verify_csrf: Apply CSRF verification. Defaults to the config value.
             locations: Token locations to search (e.g. ``["headers"]``,
@@ -958,7 +954,7 @@ class AuthX(Generic[T]):
         """
         return self.token_required(
             token_type="access",
-            verify_type=verify_type,
+            verify_type=True,
             verify_fresh=verify_fresh,
             verify_csrf=verify_csrf,
             locations=locations,
@@ -966,7 +962,6 @@ class AuthX(Generic[T]):
 
     def refresh_token_required(
         self,
-        verify_type: bool = True,
         verify_csrf: Optional[bool] = None,
         locations: Optional[TokenLocations] = None,
     ) -> Callable[[Request], Awaitable[TokenPayload]]:
@@ -977,7 +972,6 @@ class AuthX(Generic[T]):
             :meth:`access_token_required` there is no ``verify_fresh`` parameter.
 
         Args:
-            verify_type: Apply token type verification. Defaults to True.
             verify_csrf: Apply CSRF verification. Defaults to the config value.
             locations: Token locations to search (e.g. ``["headers"]``,
                        ``["cookies"]``, ``["query"]``, ``["json"]``).
@@ -985,7 +979,7 @@ class AuthX(Generic[T]):
         """
         return self.token_required(
             token_type="refresh",
-            verify_type=verify_type,
+            verify_type=True,
             verify_csrf=verify_csrf,
             locations=locations,
         )
