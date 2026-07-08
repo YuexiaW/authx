@@ -299,17 +299,89 @@ class AuthManager(_ErrorHandler):
                 _noop_openapi_security,
             )
 
-    def access_token_required(self, login_type: str) -> Callable[[Request], Awaitable[TokenPayload]]:
-        """Dependency factory requiring an access token for a login type."""
-        return self.token_required(login_type=login_type, token_type="access")
+    def access_token_required(
+        self,
+        login_type: str,
+        verify_type: bool = True,
+        verify_fresh: bool = False,
+        verify_csrf: Optional[bool] = None,
+        locations: Optional[TokenLocations] = None,
+    ) -> Callable[[Request], Awaitable[TokenPayload]]:
+        """Dependency factory requiring an access token for a login type.
 
-    def refresh_token_required(self, login_type: str) -> Callable[[Request], Awaitable[TokenPayload]]:
-        """Dependency factory requiring a refresh token for a login type."""
-        return self.token_required(login_type=login_type, token_type="refresh")
+        Args:
+            login_type: The registered login type to authenticate against.
+            verify_type: Apply token type verification. Defaults to True.
+            verify_fresh: Require token freshness. Defaults to False.
+            verify_csrf: Apply CSRF verification. Defaults to the config value.
+            locations: Token locations to search (e.g. ``["headers"]``,
+                       ``["cookies"]``, ``["query"]``, ``["json"]``).
+                       Defaults to the AuthX instance's configured locations.
+        """
+        return self.token_required(
+            login_type=login_type,
+            token_type="access",
+            verify_type=verify_type,
+            verify_fresh=verify_fresh,
+            verify_csrf=verify_csrf,
+            locations=locations,
+        )
 
-    def fresh_token_required(self, login_type: str) -> Callable[[Request], Awaitable[TokenPayload]]:
-        """Dependency factory requiring a fresh access token for a login type."""
-        return self.token_required(login_type=login_type, token_type="access", verify_fresh=True)
+    def refresh_token_required(
+        self,
+        login_type: str,
+        verify_type: bool = True,
+        verify_fresh: bool = False,
+        verify_csrf: Optional[bool] = None,
+        locations: Optional[TokenLocations] = None,
+    ) -> Callable[[Request], Awaitable[TokenPayload]]:
+        """Dependency factory requiring a refresh token for a login type.
+
+        Args:
+            login_type: The registered login type to authenticate against.
+            verify_type: Apply token type verification. Defaults to True.
+            verify_fresh: Require token freshness. Defaults to False.
+            verify_csrf: Apply CSRF verification. Defaults to the config value.
+            locations: Token locations to search (e.g. ``["headers"]``,
+                       ``["cookies"]``, ``["query"]``, ``["json"]``).
+                       Defaults to the AuthX instance's configured locations.
+        """
+        return self.token_required(
+            login_type=login_type,
+            token_type="refresh",
+            verify_type=verify_type,
+            verify_fresh=verify_fresh,
+            verify_csrf=verify_csrf,
+            locations=locations,
+        )
+
+    def fresh_token_required(
+        self,
+        login_type: str,
+        verify_type: bool = True,
+        verify_fresh: bool = True,
+        verify_csrf: Optional[bool] = None,
+        locations: Optional[TokenLocations] = None,
+    ) -> Callable[[Request], Awaitable[TokenPayload]]:
+        """Dependency factory requiring a fresh access token for a login type.
+
+        Args:
+            login_type: The registered login type to authenticate against.
+            verify_type: Apply token type verification. Defaults to True.
+            verify_fresh: Require token freshness. Defaults to True.
+            verify_csrf: Apply CSRF verification. Defaults to the config value.
+            locations: Token locations to search (e.g. ``["headers"]``,
+                       ``["cookies"]``, ``["query"]``, ``["json"]``).
+                       Defaults to the AuthX instance's configured locations.
+        """
+        return self.token_required(
+            login_type=login_type,
+            token_type="access",
+            verify_type=verify_type,
+            verify_fresh=verify_fresh,
+            verify_csrf=verify_csrf,
+            locations=locations,
+        )
 
     def scopes_required(
         self,
