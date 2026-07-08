@@ -967,15 +967,17 @@ class AuthX(Generic[T]):
     def refresh_token_required(
         self,
         verify_type: bool = True,
-        verify_fresh: bool = False,
         verify_csrf: Optional[bool] = None,
         locations: Optional[TokenLocations] = None,
     ) -> Callable[[Request], Awaitable[TokenPayload]]:
         """FastAPI Dependency to enforce presence of a `refresh` token in request.
 
+        Note:
+            Refresh tokens do not carry a ``fresh`` claim, so unlike
+            :meth:`access_token_required` there is no ``verify_fresh`` parameter.
+
         Args:
             verify_type: Apply token type verification. Defaults to True.
-            verify_fresh: Require token freshness. Defaults to False.
             verify_csrf: Apply CSRF verification. Defaults to the config value.
             locations: Token locations to search (e.g. ``["headers"]``,
                        ``["cookies"]``, ``["query"]``, ``["json"]``).
@@ -984,7 +986,6 @@ class AuthX(Generic[T]):
         return self.token_required(
             token_type="refresh",
             verify_type=verify_type,
-            verify_fresh=verify_fresh,
             verify_csrf=verify_csrf,
             locations=locations,
         )
