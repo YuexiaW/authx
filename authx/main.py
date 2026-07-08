@@ -1161,6 +1161,15 @@ class AuthX(Generic[T]):
                 locations=locations,
             )
 
+            # Superuser bypass: if a provider is configured and marks this user
+            # as superuser, skip all permission checks.
+            handler = self._permission_handler
+            if handler is not None and await handler.is_superuser(
+                uid=payload.sub,
+                login_type=self.login_type,
+            ):
+                return payload
+
             if self._config.JWT_PERMISSIONS_IN_TOKEN:
                 # Read permissions embedded in the JWT payload at token creation time.
                 # Tokens that pre-date this feature simply lack the claim → empty list.
@@ -1243,6 +1252,15 @@ class AuthX(Generic[T]):
                 verify_csrf=verify_csrf,
                 locations=locations,
             )
+
+            # Superuser bypass: if a provider is configured and marks this user
+            # as superuser, skip all role checks.
+            handler = self._permission_handler
+            if handler is not None and await handler.is_superuser(
+                uid=payload.sub,
+                login_type=self.login_type,
+            ):
+                return payload
 
             if self._config.JWT_PERMISSIONS_IN_TOKEN:
                 # Read roles embedded in the JWT payload at token creation time.

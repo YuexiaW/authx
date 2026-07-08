@@ -314,3 +314,133 @@ async def test_static_provider_missing_uid_returns_empty():
     roles = await provider.get_roles(uid="unknown")
     assert perms == []
     assert roles == []
+
+
+# ---------------------------------------------------------------------------
+# Superuser bypass tests
+# ---------------------------------------------------------------------------
+
+
+def test_superuser_bypasses_permissions_required():
+    """A superuser with no permissions can access a permissions-protected route."""
+    config = AuthXConfig(JWT_SECRET_KEY="super-secret", JWT_TOKEN_LOCATION=["headers"])
+    auth = AuthX(config=config)
+    auth.set_permission_provider(
+        StaticPermissionProvider(
+            permissions={"alice": ["users:read"]},
+            superusers={"root"},
+        )
+    )
+
+    app = FastAPI()
+    auth.handle_errors(app)
+
+    @app.get("/admin", dependencies=[Depends(auth.permissions_required("admin:*"))])
+    def admin():
+        return {"ok": True}
+
+    client = TestClient(app)
+
+    # root is a superuser → should bypass even without "admin:*" permission
+    token = auth.create_access_token(uid="root")
+    resp = client.get("/admin", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+
+    # alice has "users:read" but NOT "admin:*" → denied
+    token = auth.create_access_token(uid="alice")
+    resp = client.get("/admin", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 403
+
+
+def test_superuser_bypasses_role_required():
+    """A superuser with no roles can access a role-protected route."""
+    config = AuthXConfig(JWT_SECRET_KEY="super-secret", JWT_TOKEN_LOCATION=["headers"])
+    auth = AuthX(config=config)
+    auth.set_permission_provider(
+        StaticPermissionProvider(
+            roles={"alice": ["editor"]},
+            superusers={"root"},
+        )
+    )
+
+    app = FastAPI()
+    auth.handle_errors(app)
+
+    @app.get("/admin-role", dependencies=[Depends(auth.role_required("admin"))])
+    def admin_role():
+        return {"ok": True}
+
+    client = TestClient(app)
+
+    # root is a superuser → bypasses role check
+    token = auth.create_access_token(uid="root")
+    resp = client.get("/admin-role", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+
+    # alice has "editor" role but NOT "admin" → denied
+    token = auth.create_access_token(uid="alice")
+    resp = client.get("/admin-role", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 403
+
+
+def test_superuser_bypasses_jwt_permissions_in_token():
+    """Superuser bypass also works when JWT_PERMISSIONS_IN_TOKEN is True."""
+    config = AuthXConfig(
+        JWT_SECRET_KEY="super-secret",
+        JWT_TOKEN_LOCATION=["headers"],
+        JWT_PERMISSIONS_IN_TOKEN=True,
+    )
+    auth = AuthX(config=config)
+    auth.set_permission_provider(
+        StaticPermissionProvider(superusers={"root"})
+    )
+
+    app = FastAPI()
+    auth.handle_errors(app)
+
+    @app.get("/admin", dependencies=[Depends(auth.permissions_required("admin:*"))])
+    def admin():
+        return {"ok": True}
+
+    client = TestClient(app)
+
+    # root is superuser → bypasses regardless of token-embedded permissions
+    token = auth.create_access_token(uid="root")
+    resp = client.get("/admin", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+
+
+def test_superuser_bypass_with_authmanager():
+    """AuthManager delegates superuser bypass correctly."""
+    config = AuthXConfig(JWT_SECRET_KEY="admin-secret", JWT_TOKEN_LOCATION=["headers"])
+    from authx import AuthManager
+
+    manager = AuthManager()
+    auth = AuthX(config=config, login_type="admin")
+    manager.register(auth)
+
+    auth.set_permission_provider(
+        StaticPermissionProvider(
+            permissions={"user1": ["users:read"]},
+            superusers={"root"},
+        )
+    )
+
+    app = FastAPI()
+    auth.handle_errors(app)
+
+    @app.get("/super-only", dependencies=[Depends(manager.permissions_required("admin", "super:*"))])
+    def super_only():
+        return {"ok": True}
+
+    client = TestClient(app)
+
+    # root is superuser → bypasses
+    token = manager.create_access_token("admin", uid="root")
+    resp = client.get("/super-only", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 200
+
+    # user1 has only "users:read" → denied
+    token = manager.create_access_token("admin", uid="user1")
+    resp = client.get("/super-only", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 403
