@@ -3,6 +3,7 @@
 import contextlib
 import inspect
 from collections.abc import Awaitable, Coroutine
+from dataclasses import dataclass
 from functools import cached_property
 
 from makefun import with_signature
@@ -63,6 +64,20 @@ _OPENAPI_HEADER_DESCRIPTION = "Provide an AuthX JWT in this header, not JWT_SECR
 _OPENAPI_ACCESS_COOKIE_DESCRIPTION = "Provide an AuthX access token in this cookie."
 _OPENAPI_REFRESH_COOKIE_DESCRIPTION = "Provide an AuthX refresh token in this cookie."
 _OPENAPI_QUERY_DESCRIPTION = "Provide an AuthX JWT in this query parameter."
+
+
+@dataclass
+class _AuthCtx:
+    """Request-scoped authentication context cached by ``_auth_required``.
+
+    After a token is verified once in a request, the result (including the
+    decoded TokenPayload and whether the user is a superuser) is stored here
+    so that subsequent auth dependencies in the same request skip redundant
+    JWT decoding and permission provider queries.
+    """
+
+    payload: TokenPayload
+    is_superuser: bool = False
 
 
 class AuthX(Generic[T]):
@@ -373,6 +388,14 @@ class AuthX(Generic[T]):
         locations: Optional[TokenLocations] = None,
         token_name: Optional[str] = None,
     ) -> TokenPayload:
+        # Request-scoped cache: once a token is verified for this login_type
+        # in the current request, reuse the result to avoid redundant JWT
+        # decoding and PermissionProvider queries.
+        cache_key = f"_authx_auth_{self.login_type or ''}"
+        cached: Optional[_AuthCtx] = getattr(request.state, cache_key, None)
+        if cached is not None:
+            return cached.payload
+
         if token_type == "access":
             method = self.get_access_token_from_request
         elif token_type == "refresh":
@@ -413,6 +436,17 @@ class AuthX(Generic[T]):
         # read it without re-parsing the token.
         if payload.login_type is not None:
             request.state.login_type = payload.login_type
+
+        # Pre-compute superuser status and cache everything together so that
+        # permissions_required / role_required dependencies can avoid calling
+        # the PermissionProvider again for the same request.
+        is_superuser = False
+        if self._permission_handler is not None:
+            is_superuser = await self._permission_handler.is_superuser(
+                uid=payload.sub,
+                login_type=self.login_type,
+            )
+        setattr(request.state, cache_key, _AuthCtx(payload=payload, is_superuser=is_superuser))
 
         return payload
 
@@ -1161,13 +1195,11 @@ class AuthX(Generic[T]):
                 locations=locations,
             )
 
-            # Superuser bypass: if a provider is configured and marks this user
-            # as superuser, skip all permission checks.
-            handler = self._permission_handler
-            if handler is not None and await handler.is_superuser(
-                uid=payload.sub,
-                login_type=self.login_type,
-            ):
+            # Superuser bypass: read from the cached auth context that was
+            # computed by _auth_required, avoiding a redundant provider query.
+            cache_key = f"_authx_auth_{self.login_type or ''}"
+            cached: Optional[_AuthCtx] = getattr(request.state, cache_key, None)
+            if cached is not None and cached.is_superuser:
                 return payload
 
             if self._config.JWT_PERMISSIONS_IN_TOKEN:
@@ -1253,13 +1285,11 @@ class AuthX(Generic[T]):
                 locations=locations,
             )
 
-            # Superuser bypass: if a provider is configured and marks this user
-            # as superuser, skip all role checks.
-            handler = self._permission_handler
-            if handler is not None and await handler.is_superuser(
-                uid=payload.sub,
-                login_type=self.login_type,
-            ):
+            # Superuser bypass: read from the cached auth context that was
+            # computed by _auth_required, avoiding a redundant provider query.
+            cache_key = f"_authx_auth_{self.login_type or ''}"
+            cached: Optional[_AuthCtx] = getattr(request.state, cache_key, None)
+            if cached is not None and cached.is_superuser:
                 return payload
 
             if self._config.JWT_PERMISSIONS_IN_TOKEN:
