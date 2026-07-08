@@ -712,17 +712,17 @@ class AuthX(Generic[T]):
     @cached_property
     def FRESH_REQUIRED(self) -> TokenPayload:
         """FastAPI Dependency to enforce valid token availability in request."""
-        return Depends(self.fresh_token_required)
+        return Depends(self.fresh_token_required())
 
     @cached_property
     def ACCESS_REQUIRED(self) -> TokenPayload:
         """FastAPI Dependency to enforce presence of an `access` token in request."""
-        return Depends(self.access_token_required)
+        return Depends(self.access_token_required())
 
     @cached_property
     def REFRESH_REQUIRED(self) -> TokenPayload:
         """FastAPI Dependency to enforce presence of a `refresh` token in request."""
-        return Depends(self.refresh_token_required)
+        return Depends(self.refresh_token_required())
 
     @cached_property
     def ACCESS_TOKEN(self) -> RequestToken:
@@ -914,34 +914,79 @@ class AuthX(Generic[T]):
 
         return _auth_required
 
-    @cached_property
-    def fresh_token_required(self) -> Callable[[Request], Awaitable[TokenPayload]]:
-        """FastAPI Dependency to enforce presence of a `fresh` `access` token in request."""
+    def fresh_token_required(
+        self,
+        verify_type: bool = True,
+        verify_fresh: bool = True,
+        verify_csrf: Optional[bool] = None,
+        locations: Optional[TokenLocations] = None,
+    ) -> Callable[[Request], Awaitable[TokenPayload]]:
+        """FastAPI Dependency to enforce presence of a `fresh` `access` token in request.
+
+        Args:
+            verify_type: Apply token type verification. Defaults to True.
+            verify_fresh: Require token freshness. Defaults to True.
+            verify_csrf: Apply CSRF verification. Defaults to the config value.
+            locations: Token locations to search (e.g. ``["headers"]``,
+                       ``["cookies"]``, ``["query"]``, ``["json"]``).
+                       Defaults to the configured locations.
+        """
         return self.token_required(
             token_type="access",
-            verify_csrf=None,
-            verify_fresh=True,
-            verify_type=True,
+            verify_type=verify_type,
+            verify_fresh=verify_fresh,
+            verify_csrf=verify_csrf,
+            locations=locations,
         )
 
-    @cached_property
-    def access_token_required(self) -> Callable[[Request], Awaitable[TokenPayload]]:
-        """FastAPI Dependency to enforce presence of an `access` token in request."""
+    def access_token_required(
+        self,
+        verify_type: bool = True,
+        verify_fresh: bool = False,
+        verify_csrf: Optional[bool] = None,
+        locations: Optional[TokenLocations] = None,
+    ) -> Callable[[Request], Awaitable[TokenPayload]]:
+        """FastAPI Dependency to enforce presence of an `access` token in request.
+
+        Args:
+            verify_type: Apply token type verification. Defaults to True.
+            verify_fresh: Require token freshness. Defaults to False.
+            verify_csrf: Apply CSRF verification. Defaults to the config value.
+            locations: Token locations to search (e.g. ``["headers"]``,
+                       ``["cookies"]``, ``["query"]``, ``["json"]``).
+                       Defaults to the configured locations.
+        """
         return self.token_required(
             token_type="access",
-            verify_csrf=None,
-            verify_fresh=False,
-            verify_type=True,
+            verify_type=verify_type,
+            verify_fresh=verify_fresh,
+            verify_csrf=verify_csrf,
+            locations=locations,
         )
 
-    @cached_property
-    def refresh_token_required(self) -> Callable[[Request], Awaitable[TokenPayload]]:
-        """FastAPI Dependency to enforce presence of a `refresh` token in request."""
+    def refresh_token_required(
+        self,
+        verify_type: bool = True,
+        verify_fresh: bool = False,
+        verify_csrf: Optional[bool] = None,
+        locations: Optional[TokenLocations] = None,
+    ) -> Callable[[Request], Awaitable[TokenPayload]]:
+        """FastAPI Dependency to enforce presence of a `refresh` token in request.
+
+        Args:
+            verify_type: Apply token type verification. Defaults to True.
+            verify_fresh: Require token freshness. Defaults to False.
+            verify_csrf: Apply CSRF verification. Defaults to the config value.
+            locations: Token locations to search (e.g. ``["headers"]``,
+                       ``["cookies"]``, ``["query"]``, ``["json"]``).
+                       Defaults to the configured locations.
+        """
         return self.token_required(
             token_type="refresh",
-            verify_csrf=None,
-            verify_fresh=False,
-            verify_type=True,
+            verify_type=verify_type,
+            verify_fresh=verify_fresh,
+            verify_csrf=verify_csrf,
+            locations=locations,
         )
 
     def scopes_required(

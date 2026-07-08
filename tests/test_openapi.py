@@ -17,7 +17,7 @@ def test_access_token_required_adds_openapi_bearer_security_metadata():
     app = FastAPI()
 
     @app.get("/protected")
-    async def protected(payload: Annotated[TokenPayload, Depends(auth.access_token_required)]):
+    async def protected(payload: Annotated[TokenPayload, Depends(auth.access_token_required())]):
         return {"sub": payload.sub}
 
     openapi = app.openapi()
@@ -37,7 +37,7 @@ def test_route_level_access_token_required_adds_openapi_security_metadata():
     auth = AuthX(config=AuthXConfig(JWT_SECRET_KEY="secret"))
     app = FastAPI()
 
-    @app.get("/protected", dependencies=[Depends(auth.access_token_required)])
+    @app.get("/protected", dependencies=[Depends(auth.access_token_required())])
     async def protected():
         return {"ok": True}
 
@@ -57,7 +57,7 @@ def test_custom_header_token_location_adds_api_key_header_security_metadata():
     )
     app = FastAPI()
 
-    @app.get("/protected", dependencies=[Depends(auth.access_token_required)])
+    @app.get("/protected", dependencies=[Depends(auth.access_token_required())])
     async def protected():
         return {"ok": True}
 
@@ -81,7 +81,7 @@ def test_token_locations_add_matching_openapi_security_schemes():
     )
     app = FastAPI()
 
-    @app.get("/protected", dependencies=[Depends(auth.access_token_required)])
+    @app.get("/protected", dependencies=[Depends(auth.access_token_required())])
     async def protected():
         return {"ok": True}
 
@@ -124,7 +124,7 @@ def test_openapi_security_dependency_does_not_require_authorization_header_for_c
     app = FastAPI()
 
     @app.get("/protected")
-    async def protected(payload: Annotated[TokenPayload, Depends(auth.access_token_required)]):
+    async def protected(payload: Annotated[TokenPayload, Depends(auth.access_token_required())]):
         return {"sub": payload.sub}
 
     token = auth.create_access_token(uid="alice")
@@ -139,7 +139,7 @@ def test_access_token_required_accepts_valid_swagger_bearer_token():
     app = FastAPI()
 
     @app.get("/protected")
-    async def protected(payload: Annotated[TokenPayload, Depends(auth.access_token_required)]):
+    async def protected(payload: Annotated[TokenPayload, Depends(auth.access_token_required())]):
         return {"sub": payload.sub}
 
     token = auth.create_access_token(uid="alice")
@@ -154,7 +154,7 @@ def test_access_token_required_handles_invalid_token_without_registered_error_ha
     app = FastAPI()
 
     @app.get("/protected")
-    async def protected(payload: Annotated[TokenPayload, Depends(auth.access_token_required)]):
+    async def protected(payload: Annotated[TokenPayload, Depends(auth.access_token_required())]):
         return {"sub": payload.sub}
 
     response = TestClient(app).get("/protected", headers={"Authorization": "Bearer secret"})
@@ -171,7 +171,7 @@ def test_access_token_required_handles_missing_token_without_registered_error_ha
     app = FastAPI()
 
     @app.get("/protected")
-    async def protected(payload: Annotated[TokenPayload, Depends(auth.access_token_required)]):
+    async def protected(payload: Annotated[TokenPayload, Depends(auth.access_token_required())]):
         return {"sub": payload.sub}
 
     response = TestClient(app).get("/protected")
@@ -190,7 +190,7 @@ def test_access_token_required_uses_registered_error_handlers_when_present():
     auth.handle_errors(app)
 
     @app.get("/protected")
-    async def protected(payload: Annotated[TokenPayload, Depends(auth.access_token_required)]):
+    async def protected(payload: Annotated[TokenPayload, Depends(auth.access_token_required())]):
         return {"sub": payload.sub}
 
     response = TestClient(app).get("/protected", headers={"Authorization": "Bearer secret"})
