@@ -31,9 +31,21 @@ class JWTDecodeError(AuthXException):
 
 
 class TokenExpiredError(JWTDecodeError):
-    """Exception raised when a JSON Web Token has expired."""
+    """Exception raised when a JSON Web Token has expired.
 
-    pass
+    Attributes:
+        token_type: The type of the expired token (``"access"`` or ``"refresh"``),
+            or ``None`` if it could not be determined.
+    """
+
+    def __init__(
+        self,
+        *args: Any,
+        token_type: Optional[str] = None,
+        **kwargs: Any,
+    ) -> None:
+        self.token_type = token_type
+        super().__init__(*args, **kwargs)
 
 
 class TokenInvalidSignatureError(JWTDecodeError):

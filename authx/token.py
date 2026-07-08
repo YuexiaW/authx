@@ -134,7 +134,23 @@ def decode_token(
             options={"verify_signature": verify},
         )
     except ExpiredSignatureError as e:
-        raise TokenExpiredError("Token has expired") from e
+        # Re-decode without expiry validation to extract the token's
+        # ``type`` claim before raising, so that exception handlers can
+        # distinguish an expired access token from an expired refresh token.
+        token_type: Optional[str] = None
+        try:
+            raw = jwt.decode(
+                jwt=token,
+                key=key,
+                algorithms=algorithm,
+                audience=audience,
+                issuer=issuer,
+                options={"verify_signature": False, "verify_exp": False},
+            )
+            token_type = raw.get("type")
+        except Exception:
+            pass
+        raise TokenExpiredError("Token has expired", token_type=token_type) from e
     except InvalidSignatureError as e:
         raise TokenInvalidSignatureError("Signature verification failed") from e
     except InvalidAudienceError as e:
