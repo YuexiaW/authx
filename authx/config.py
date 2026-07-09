@@ -86,6 +86,12 @@ class AuthXConfig(BaseSettings):
     # Permission caching
     JWT_PERMISSIONS_IN_TOKEN: bool = False
 
+    # Superuser role — when set, any user whose ``get_roles()`` includes
+    # this role name bypasses all permission and role checks in
+    # ``permissions_required`` and ``role_required`` dependencies.
+    # Defaults to empty string (superuser check disabled).
+    JWT_SUPER_ROLE: str = ""
+
     # Session Tracking Options
     JWT_SESSION_TRACKING: bool = False
     JWT_SESSION_UPDATE_LAST_ACTIVE: bool = True

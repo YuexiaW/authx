@@ -317,18 +317,22 @@ async def test_static_provider_missing_uid_returns_empty():
 
 
 # ---------------------------------------------------------------------------
-# Superuser bypass tests
+# JWT_SUPER_ROLE bypass tests
 # ---------------------------------------------------------------------------
 
 
-def test_superuser_bypasses_permissions_required():
-    """A superuser with no permissions can access a permissions-protected route."""
-    config = AuthXConfig(JWT_SECRET_KEY="super-secret", JWT_TOKEN_LOCATION=["headers"])
+def test_super_role_bypasses_permissions_required():
+    """User with JWT_SUPER_ROLE can access a permissions-protected route."""
+    config = AuthXConfig(
+        JWT_SECRET_KEY="super-secret",
+        JWT_TOKEN_LOCATION=["headers"],
+        JWT_SUPER_ROLE="super_admin",
+    )
     auth = AuthX(config=config)
     auth.set_permission_provider(
         StaticPermissionProvider(
             permissions={"alice": ["users:read"]},
-            superusers={"root"},
+            roles={"root": ["super_admin"], "alice": ["editor"]},
         )
     )
 
@@ -341,7 +345,7 @@ def test_superuser_bypasses_permissions_required():
 
     client = TestClient(app)
 
-    # root is a superuser → should bypass even without "admin:*" permission
+    # root has "super_admin" role → bypasses even without "admin:*" permission
     token = auth.create_access_token(uid="root")
     resp = client.get("/admin", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
@@ -352,14 +356,17 @@ def test_superuser_bypasses_permissions_required():
     assert resp.status_code == 403
 
 
-def test_superuser_bypasses_role_required():
-    """A superuser with no roles can access a role-protected route."""
-    config = AuthXConfig(JWT_SECRET_KEY="super-secret", JWT_TOKEN_LOCATION=["headers"])
+def test_super_role_bypasses_role_required():
+    """User with JWT_SUPER_ROLE can access a role-protected route."""
+    config = AuthXConfig(
+        JWT_SECRET_KEY="super-secret",
+        JWT_TOKEN_LOCATION=["headers"],
+        JWT_SUPER_ROLE="super_admin",
+    )
     auth = AuthX(config=config)
     auth.set_permission_provider(
         StaticPermissionProvider(
-            roles={"alice": ["editor"]},
-            superusers={"root"},
+            roles={"root": ["super_admin"], "alice": ["editor"]},
         )
     )
 
@@ -372,47 +379,46 @@ def test_superuser_bypasses_role_required():
 
     client = TestClient(app)
 
-    # root is a superuser → bypasses role check
+    # root has "super_admin" → bypasses role check
     token = auth.create_access_token(uid="root")
     resp = client.get("/admin-role", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
 
-    # alice has "editor" role but NOT "admin" → denied
+    # alice has "editor" but NOT "admin" → denied
     token = auth.create_access_token(uid="alice")
     resp = client.get("/admin-role", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 403
 
 
-def test_superuser_bypasses_jwt_permissions_in_token():
-    """Superuser bypass also works when JWT_PERMISSIONS_IN_TOKEN is True."""
+def test_super_role_no_provider_no_bypass():
+    """Without a PermissionProvider, JWT_SUPER_ROLE has no effect."""
     config = AuthXConfig(
         JWT_SECRET_KEY="super-secret",
         JWT_TOKEN_LOCATION=["headers"],
-        JWT_PERMISSIONS_IN_TOKEN=True,
+        JWT_SUPER_ROLE="super_admin",
     )
     auth = AuthX(config=config)
-    auth.set_permission_provider(
-        StaticPermissionProvider(superusers={"root"})
-    )
 
     app = FastAPI()
     auth.handle_errors(app)
 
-    @app.get("/admin", dependencies=[Depends(auth.permissions_required("admin:*"))])
-    def admin():
+    @app.get("/no-provider", dependencies=[Depends(auth.permissions_required("anything"))])
+    def no_provider():
         return {"ok": True}
 
     client = TestClient(app)
-
-    # root is superuser → bypasses regardless of token-embedded permissions
     token = auth.create_access_token(uid="root")
-    resp = client.get("/admin", headers={"Authorization": f"Bearer {token}"})
-    assert resp.status_code == 200
+    with pytest.raises(RuntimeError, match="No PermissionProvider configured"):
+        client.get("/no-provider", headers={"Authorization": f"Bearer {token}"})
 
 
-def test_superuser_bypass_with_authmanager():
-    """AuthManager delegates superuser bypass correctly."""
-    config = AuthXConfig(JWT_SECRET_KEY="admin-secret", JWT_TOKEN_LOCATION=["headers"])
+def test_super_role_bypass_with_authmanager():
+    """AuthManager delegates JWT_SUPER_ROLE bypass correctly."""
+    config = AuthXConfig(
+        JWT_SECRET_KEY="admin-secret",
+        JWT_TOKEN_LOCATION=["headers"],
+        JWT_SUPER_ROLE="super_admin",
+    )
     from authx import AuthManager
 
     manager = AuthManager()
@@ -422,7 +428,7 @@ def test_superuser_bypass_with_authmanager():
     auth.set_permission_provider(
         StaticPermissionProvider(
             permissions={"user1": ["users:read"]},
-            superusers={"root"},
+            roles={"root": ["super_admin"]},
         )
     )
 
@@ -435,7 +441,7 @@ def test_superuser_bypass_with_authmanager():
 
     client = TestClient(app)
 
-    # root is superuser → bypasses
+    # root has "super_admin" role → bypasses
     token = manager.create_access_token("admin", uid="root")
     resp = client.get("/super-only", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200

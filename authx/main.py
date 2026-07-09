@@ -440,12 +440,15 @@ class AuthX(Generic[T]):
         # Pre-compute superuser status and cache everything together so that
         # permissions_required / role_required dependencies can avoid calling
         # the PermissionProvider again for the same request.
+        # When JWT_SUPER_ROLE is configured, a user whose get_roles() contains
+        # that role name bypasses all permission/role checks.
         is_superuser = False
-        if self._permission_handler is not None:
-            is_superuser = await self._permission_handler.is_superuser(
+        if self._config.JWT_SUPER_ROLE and self._permission_handler is not None:
+            roles = await self._permission_handler.get_roles(
                 uid=payload.sub,
                 login_type=self.login_type,
             )
+            is_superuser = self._config.JWT_SUPER_ROLE in roles
         setattr(request.state, cache_key, _AuthCtx(payload=payload, is_superuser=is_superuser))
 
         return payload
